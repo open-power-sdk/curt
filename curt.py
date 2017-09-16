@@ -1,5 +1,7 @@
 #!/usr/bin/python
-# Licensed under the terms of the GNU GPL License version 2
+# Copyright (c) IBM 2017 All Rights Reserved.
+# Project name: curt
+# This project is licensed under the GPL License 2.0, see LICENSE.
 
 import os
 import sys
