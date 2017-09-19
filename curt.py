@@ -6,6 +6,7 @@
 import os
 import sys
 import string
+import argparse
 
 if 'PERF_EXEC_PATH' in os.environ:
 	sys.path.append(os.environ['PERF_EXEC_PATH'] + \
@@ -23,6 +24,10 @@ except:
 from Core import *
 from Util import *
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--debug', action='store_true', help='enable debugging output')
+params = parser.parse_args()
+
 global endTimestamp
 global beginTimestamp
 
@@ -30,9 +35,8 @@ syscalls = autodict()
 task_state = autodict()
 task_info = autodict()
 
-debug=0
 def debug_print(s):
-	if debug:
+	if params.debug:
 		print s
 
 # convert string in the form of a bytearray with null termination
@@ -157,7 +161,7 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 		task_state[common_tid]['pending'][id] = 0
 	change_mode('sys',common_tid,endTimestamp)
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([common_tid])
 
 def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
@@ -233,7 +237,7 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 
 	change_mode('user',common_tid,endTimestamp)
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([common_tid])
 
 def sched__sched_switch(event_name, context, common_cpu,
@@ -288,7 +292,7 @@ def sched__sched_switch(event_name, context, common_cpu,
 	# we have to wait to determine the mode and treat it as pending...
 	change_mode(task_state[next_pid]['resume-mode'], next_pid, endTimestamp)
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([prev_pid, next_pid])
 
 def sched__sched_migrate_task(event_name, context, common_cpu,
@@ -330,7 +334,7 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 		new_tid_cpu(pid, dest_cpu)
 	task_state[pid]['cpu'] = dest_cpu
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([pid])
 
 def sched__sched_process_exec(event_name, context, common_cpu,
@@ -395,7 +399,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 		task_state[task]['min'][id] = task_state[old_pid]['min'][id]
 		task_state[task]['max'][id] = task_state[old_pid]['max'][id]
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([old_pid])
 		print_syscall_totals([task])
 
@@ -409,7 +413,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 	# args is not used by the caller, or we're in trouble
 	raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, pid, common_comm, common_callchain, EXEC, 'args', perf_sample_dict)
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([pid])
 
 def sched__sched_process_fork(event_name, context, common_cpu,
@@ -442,7 +446,7 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 	task_state[child_pid]['elapsed'][id] = 0
 	task_state[child_pid]['pending'][id] = 0
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([common_tid, child_pid])
 
 def sched__sched_process_exit(event_name, context, common_cpu,
@@ -461,7 +465,7 @@ def sched__sched_process_exit(event_name, context, common_cpu,
 	change_mode('exit', common_tid, endTimestamp)
 	task_state[common_tid]['exit'][common_cpu] = 0
 
-	if debug:
+	if params.debug:
 		print_syscall_totals([common_tid])
 
 #def trace_unhandled(event_name, context, event_fields_dict):
