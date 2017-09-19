@@ -134,8 +134,10 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 	debug_print("%07u.%09u %9s %d:%d [%d] %s" % (common_secs, common_nsecs, 'enter', common_pid, common_tid, common_cpu, syscall_name(id)))
 
 	if common_tid not in task_info.keys():
-		# time before now should count as "pending user"
 		new_task(common_tid, common_pid, common_comm)
+		# time before now should count as "pending user"
+		task_info[task]['timestamp'] = beginTimestamp
+		task_info[task]['mode'] = 'user'
 
 	if common_cpu not in task_state[common_tid]['sys'].keys():
 		new_tid_cpu(common_tid, common_cpu)
@@ -416,15 +418,29 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 	common_pid = perf_sample_dict['sample']['pid']
 	common_tid = perf_sample_dict['sample']['tid']
 
+	global beginTimestamp
+	global endTimestamp
+	if ( beginTimestamp == 0):
+		beginTimestamp = msecs(common_secs,common_nsecs)
+	endTimestamp = msecs(common_secs,common_nsecs)
+
 	debug_print("%07u.%09u %9s [%u:%u] [%u] (parent_pid=%u)" % (common_secs, common_nsecs, 'fork', common_pid, common_tid, child_pid, parent_pid))
 
 	new_task(child_pid, common_pid, common_comm)
+	new_tid_cpu(child_pid, common_cpu)
 	task_state[child_pid]['mode'] = 'idle'
-	task_state[child_pid]['timestamp'] = msecs(common_secs,common_nsecs)
-	perf_sample_dict['sample']['tid'] = child_pid
+	task_state[child_pid]['timestamp'] = endTimestamp
 	CLONE = 120
-	# args is not used by the caller, or we're in trouble
-	raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, CLONE, 'args', perf_sample_dict)
+	id = CLONE
+	task_state[child_pid]['cpu'] = common_cpu
+	task_state[child_pid]['resume-mode'] = 'sys'
+	task_state[child_pid]['id'] = id
+	task_state[child_pid]['sys_enter'] = endTimestamp
+	task_state[child_pid]['min'][id] = 999999999
+	task_state[child_pid]['max'][id] = 0
+	task_state[child_pid]['count'][id] = 0
+	task_state[child_pid]['elapsed'][id] = 0
+	task_state[child_pid]['pending'][id] = 0
 
 	if debug:
 		print_syscall_totals([common_tid, child_pid])
