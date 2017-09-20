@@ -150,6 +150,13 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 		print "re-entered! syscall from signal handler??"
 		sys.exit(0)
 
+	if task_state[common_tid]['mode'] == 'busy-unknown':
+		task_state[common_tid]['mode'] = 'user'
+		for cpu in task_state[common_tid]['busy-unknown'].keys():
+			task_state[common_tid]['user'][cpu] = task_state[common_tid]['busy-unknown'][cpu] 
+			task_state[common_tid]['busy-unknown'][cpu] = 0
+		pending = True
+
 	task_state[common_tid]['cpu'] = common_cpu
 	task_state[common_tid]['id'] = id
 	task_state[common_tid]['sys_enter'] = endTimestamp
@@ -194,8 +201,9 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 
 	if task_state[common_tid]['mode'] == 'busy-unknown':
 		task_state[common_tid]['mode'] = 'sys'
-		task_state[common_tid]['sys'][common_cpu] = task_state[common_tid]['busy-unknown'][common_cpu] 
-		task_state[common_tid]['busy-unknown'][common_cpu] = 0
+		for cpu in task_state[common_tid]['busy-unknown'].keys():
+			task_state[common_tid]['sys'][cpu] = task_state[common_tid]['busy-unknown'][cpu] 
+			task_state[common_tid]['busy-unknown'][cpu] = 0
 		pending = True
 
 	if id not in task_state[common_tid]['count'].keys():
@@ -319,7 +327,7 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 		# self-parenting for now...
 		new_task(pid, pid, comm)
 		task_state[pid]['cpu'] = orig_cpu
-		task_state[pid]['mode'] = 'busy-unknown'
+		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
 		task_state[pid]['timestamp'] = beginTimestamp
 		task_state[pid]['busy-unknown'][orig_cpu] = 0
