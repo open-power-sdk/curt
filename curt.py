@@ -517,11 +517,11 @@ def print_syscall_totals(tidlist):
 				print "\t[%8s] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % (task, comm, task_user, task_sys, task_busy, task_idle, task_running * 100 / (task_running + task_idle) if task_running > 0 else 0, task_state[task]['migrations'])
 				print
 				if task_state[task]['count']:
-					print "\t     -- (%3s)%-20s %6s %12s+%12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
-					for id in task_state[task]['count'].keys():
+					print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
+					for id in sorted(task_state[task]['count'].keys(), key= lambda x: (task_state[task]['count'][x], task_state[task]['elapsed'][x]), reverse=True):
 						count = task_state[task]['count'][id]
 						elapsed = task_state[task]['elapsed'][id]
-						print "\t\t(%3u)%-20s %6u %12.6f+%12.6f" % (id, syscall_name(id), count, elapsed, task_state[task]['pending'][id]),
+						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), count, elapsed, task_state[task]['pending'][id]),
 						if count > 0:
 							print " %12.6f %12.6f %12.6f" % (elapsed/count, task_state[task]['min'][id], task_state[task]['max'][id])
 						else:
