@@ -568,12 +568,12 @@ def print_syscall_totals(tidlist):
 	print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
 	print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % ("", all_user, all_sys, all_busy, all_idle, (all_user + all_sys + all_busy) * 100 / (all_user + all_sys + all_busy + all_idle) if all_user + all_sys + all_busy > 0 else 0, all_migrations)
 	print
-  	print "\t     -- (%3s)%-20s %6s %14s+%14s %16s %16s %16s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
+	print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
 	for id in sorted(task_state['ALL']['count'].keys(), key= lambda x: (task_state['ALL']['count'][x], task_state['ALL']['elapsed'][x]), reverse=True):
-		print "\t\t(%3u)%-20s %6u %14.6f+%14.6f" % (id, syscall_name(id), task_state['ALL']['count'][id], task_state['ALL']['elapsed'][id], task_state['ALL']['pending'][id]),
+		print "\t\t(%3u)%-20s %6u %12.6f+%12.6f" % (id, syscall_name(id), task_state['ALL']['count'][id], task_state['ALL']['elapsed'][id], task_state['ALL']['pending'][id]),
 		if task_state['ALL']['count'][id] > 0:
-			print " %16.6f %16.6f %16.6f" % (task_state['ALL']['elapsed'][id]/task_state['ALL']['count'][id], task_state['ALL']['min'][id], task_state['ALL']['max'][id])
+			print " %12.6f %12.6f %12.6f" % (task_state['ALL']['elapsed'][id]/task_state['ALL']['count'][id], task_state['ALL']['min'][id], task_state['ALL']['max'][id])
 		else:
-			print " %16s %16s %16s" % ("--", "--", "--")
+			print " %12s %12s %12s" % ("--", "--", "--")
 	print
 	print "Total Trace Time: %f msec" % (endTimestamp - beginTimestamp)
