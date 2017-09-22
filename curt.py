@@ -487,6 +487,11 @@ def print_syscall_totals(tidlist):
 		if pid not in pids:	
 			 pids.append(pid)
 	print "-- PID:"
+	all_user = 0
+	all_sys = 0
+	all_idle = 0
+	all_busy = 0
+	all_migrations = 0
 	for pid in sorted(pids):
 		if pid == 0:
 			continue
@@ -495,6 +500,7 @@ def print_syscall_totals(tidlist):
 		proc_sys = 0
 		proc_idle = 0
 		proc_busy = 0
+		proc_migrations = 0
 		for task in sorted(tidlist):
 			if task_info[task]['pid'] == pid:
 				print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
@@ -502,6 +508,7 @@ def print_syscall_totals(tidlist):
 				task_sys = 0
 				task_idle = 0
 				task_busy = 0
+				task_migrations = task_state[task]['migrations']
 				# each "comm" is delivered as a bytearray:
 				#   the actual command, a null terminator, and garbage
 				# "print" wants to splat every byte, including the garbage
@@ -514,23 +521,59 @@ def print_syscall_totals(tidlist):
 					task_idle += task_state[task]['idle'][cpu]
 					task_busy += task_state[task]['busy-unknown'][cpu]
 					task_running = task_user + task_sys + task_busy
-				print "\t[%8s] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % (task, comm, task_user, task_sys, task_busy, task_idle, task_running * 100 / (task_running + task_idle) if task_running > 0 else 0, task_state[task]['migrations'])
+				print "\t[%8s] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % (task, comm, task_user, task_sys, task_busy, task_idle, task_running * 100 / (task_running + task_idle) if task_running > 0 else 0, task_migrations)
 				print
 				if task_state[task]['count']:
 					print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
 					for id in sorted(task_state[task]['count'].keys(), key= lambda x: (task_state[task]['count'][x], task_state[task]['elapsed'][x]), reverse=True):
 						count = task_state[task]['count'][id]
 						elapsed = task_state[task]['elapsed'][id]
-						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), count, elapsed, task_state[task]['pending'][id]),
+						pending = task_state[task]['pending'][id]
+						min = task_state[task]['min'][id]
+						max = task_state[task]['max'][id]
+						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), count, elapsed, pending),
 						if count > 0:
-							print " %12.6f %12.6f %12.6f" % (elapsed/count, task_state[task]['min'][id], task_state[task]['max'][id])
+							print " %12.6f %12.6f %12.6f" % (elapsed/count, min, max)
 						else:
 							print " %12s %12s %12s" % ("--", "--", "--")
+						if id not in task_state['ALL']['count'].keys():
+							task_state['ALL']['count'][id] = 0
+							task_state['ALL']['elapsed'][id] = 0
+							task_state['ALL']['pending'][id] = 0
+							task_state['ALL']['max'][id] = 0
+							task_state['ALL']['min'][id] = 999999999
+						task_state['ALL']['count'][id] += count
+						task_state['ALL']['elapsed'][id] += elapsed
+						task_state['ALL']['pending'][id] += pending
+						if min < task_state['ALL']['min'][id]:
+							task_state['ALL']['min'][id] = min
+						if max > task_state['ALL']['max'][id]:
+							task_state['ALL']['max'][id] = max
 					print
 				proc_user += task_user
 				proc_sys += task_sys
 				proc_idle += task_idle
 				proc_busy += task_busy
-		print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%%" % ("", proc_user, proc_sys, proc_busy, proc_idle, (proc_user + proc_sys + proc_busy) * 100 / (proc_user + proc_sys + proc_busy + proc_idle) if proc_user + proc_sys + proc_busy > 0 else 0)
+				proc_migrations += task_migrations
+		all_user += proc_user
+		all_sys += proc_sys
+		all_idle += proc_idle
+		all_busy += proc_busy
+		all_migrations += proc_migrations
+		print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
+		print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % ("", proc_user, proc_sys, proc_busy, proc_idle, (proc_user + proc_sys + proc_busy) * 100 / (proc_user + proc_sys + proc_busy + proc_idle) if proc_user + proc_sys + proc_busy > 0 else 0, proc_migrations)
 
+	print
+	print "%6s:" % ("ALL")
+	print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
+	print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % ("", all_user, all_sys, all_busy, all_idle, (all_user + all_sys + all_busy) * 100 / (all_user + all_sys + all_busy + all_idle) if all_user + all_sys + all_busy > 0 else 0, all_migrations)
+	print
+  	print "\t     -- (%3s)%-20s %6s %14s+%14s %16s %16s %16s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
+	for id in sorted(task_state['ALL']['count'].keys(), key= lambda x: (task_state['ALL']['count'][x], task_state['ALL']['elapsed'][x]), reverse=True):
+		print "\t\t(%3u)%-20s %6u %14.6f+%14.6f" % (id, syscall_name(id), task_state['ALL']['count'][id], task_state['ALL']['elapsed'][id], task_state['ALL']['pending'][id]),
+		if task_state['ALL']['count'][id] > 0:
+			print " %16.6f %16.6f %16.6f" % (task_state['ALL']['elapsed'][id]/task_state['ALL']['count'][id], task_state['ALL']['min'][id], task_state['ALL']['max'][id])
+		else:
+			print " %16s %16s %16s" % ("--", "--", "--")
+	print
 	print "Total Trace Time: %f msec" % (endTimestamp - beginTimestamp)
