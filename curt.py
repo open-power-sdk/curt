@@ -34,6 +34,7 @@ global beginTimestamp
 syscalls = autodict()
 task_state = autodict()
 task_info = autodict()
+task_tids = []
 
 def debug_print(s):
 	if params.debug:
@@ -53,7 +54,7 @@ def trace_begin():
 
 def trace_end():
 	# wrap up pending here
-	for task in task_info.keys():
+	for task in task_tids:
 		if task == 0:
 			continue
 
@@ -64,7 +65,7 @@ def trace_end():
 			task_state[task]['pending'][id] += delta
 			task_state[task]['sys'][cpu] += delta
 			debug_print("task %u syscall %s pending time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
-			debug_print("task %u sys time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['sys'][cpu] - delta, delta, task_state[task]['sys'][cpu]))
+			debug_print("task %u (%s) sys time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['sys'][cpu] - delta, delta, task_state[task]['sys'][cpu]))
 
 		elif task_state[task]['mode'] == 'user':
 			delta = endTimestamp - task_state[task]['timestamp']
@@ -92,7 +93,7 @@ def trace_end():
 			task_state[task]['busy-unknown'][cpu] += delta
 			debug_print("task %u busy-unknown %f + %f = %fms" % (task, task_state[task]['busy-unknown'][cpu] - delta, delta, task_state[task]['busy-unknown'][cpu]))
 
-	print_syscall_totals(task_info.keys())
+	print_syscall_totals(task_tids)
 
 beginTimestamp = 0
 endTimestamp = 0
@@ -106,6 +107,7 @@ def new_task(tid, pid, comm):
 	task_info[tid]['pid'] = pid
 	task_info[tid]['comm'] = comm
 	task_state[tid]['migrations'] = 0
+	task_tids.append(tid);
 
 def new_tid_cpu(tid, cpu):
 	if tid != 0:
@@ -137,7 +139,7 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 
 	debug_print("%07u.%09u %9s %d:%d [%d] %s" % (common_secs, common_nsecs, 'enter', common_pid, common_tid, common_cpu, syscall_name(id)))
 
-	if common_tid not in task_info.keys():
+	if common_tid not in task_tids:
 		new_task(common_tid, common_pid, common_comm)
 		# time before now should count as "pending user"
 		task_info[task]['timestamp'] = beginTimestamp
@@ -183,7 +185,7 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 	debug_print("%07u.%09u %9s %u:%u [%u] %u:%s" % (common_secs, common_nsecs, 'exit', common_pid, common_tid, common_cpu, id, syscall_name(id)))
 
 	pending = False
-	if common_tid not in task_info.keys():
+	if common_tid not in task_tids:
 		new_task(common_tid, common_pid, common_comm)
 		task_state[common_tid]['cpu'] = common_cpu
 		task_state[common_tid]['mode'] = 'sys'
@@ -263,7 +265,7 @@ def sched__sched_switch(event_name, context, common_cpu,
 
 	debug_print("%07u.%09u %9s %u:%s %u:%s" % (common_secs, common_nsecs, 'switch', prev_pid, task_state[prev_pid]['mode'], next_pid, task_state[next_pid]['mode']))
 
-	if prev_pid not in task_info.keys():
+	if prev_pid not in task_tids:
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
@@ -280,7 +282,7 @@ def sched__sched_switch(event_name, context, common_cpu,
 	task_state[prev_pid]['resume-mode'] = task_state[prev_pid]['mode']
 	change_mode('idle', prev_pid, endTimestamp)
 
-	if next_pid not in task_info.keys():
+	if next_pid not in task_tids:
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
@@ -321,7 +323,7 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 	if orig_cpu == dest_cpu:
 		return
 
-	if pid not in task_info.keys():
+	if pid not in task_tids:
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
@@ -359,7 +361,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 
 	debug_print("%07u.%09u %9s filename=%s, pid=%d, old_pid=%d" % (common_secs, common_nsecs, 'exec', filename, pid, old_pid))
 
-	if old_pid not in task_info.keys():
+	if old_pid not in task_tids:
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
@@ -385,7 +387,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 	suffix=0
 	while True:
 		task = str(old_pid)+"-"+str(suffix)
-		if task in task_info.keys():
+		if task in task_tids:
 			suffix += 1
 		else:
 			break
@@ -393,6 +395,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 
 	task_info[task]['pid'] = task_info[old_pid]['pid']
 	task_info[task]['comm'] = task_info[old_pid]['comm']
+	task_tids.append(task)
 	task_state[task]['mode'] = 'exit'
 	task_state[task]['migrations'] = task_state[old_pid]['migrations']
 	for cpu in sorted(task_state[old_pid]['sys'].keys()):
@@ -412,6 +415,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 		print_syscall_totals([task])
 
 	del task_info[old_pid]
+	task_tids.remove(old_pid)
 	del task_state[old_pid]
 	new_task(common_pid, pid, common_comm)
 	task_state[pid]['mode'] = 'idle'
