@@ -101,7 +101,7 @@ def ns2ms(nsecs):
 
 def new_task(tid, pid, comm):
 	if tid != 0:
-		debug_print("new task %u (%u:%s)" % (tid, pid, null(comm)))
+		debug_print("new task %u (%s:%s)" % (tid, str(pid), null(comm)))
 	task_info[tid]['pid'] = pid
 	task_info[tid]['comm'] = comm
 	task_state[tid]['migrations'] = 0
@@ -139,8 +139,10 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 	if common_tid not in task_tids:
 		new_task(common_tid, common_pid, common_comm)
 		# time before now should count as "pending user"
-		task_info[task]['timestamp'] = start_timestamp
-		task_info[task]['mode'] = 'user'
+		task_state[task]['timestamp'] = start_timestamp
+		task_state[task]['mode'] = 'user'
+	elif task_info[common_tid]['pid'] == 'unknown':
+		task_info[common_tid]['pid'] = common_pid
 
 	if common_cpu not in task_state[common_tid]['sys'].keys():
 		new_tid_cpu(common_tid, common_cpu)
@@ -188,6 +190,8 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 		task_state[common_tid]['id'] = id
 		task_state[common_tid]['timestamp'] = start_timestamp
 		pending = True
+	elif task_info[common_tid]['pid'] == 'unknown':
+		task_info[common_tid]['pid'] = common_pid
 
 	# sched_setaffinity, at least, can migrate a task without triggering
 	# a sched_migrate_task event
@@ -263,7 +267,7 @@ def sched__sched_switch(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(prev_pid, prev_pid, prev_comm)
+		new_task(prev_pid, 'unknown', prev_comm)
 		task_state[prev_pid]['cpu'] = common_cpu
 		task_state[prev_pid]['mode'] = 'busy-unknown'
 		task_state[prev_pid]['resume-mode'] = 'busy-unknown'
@@ -280,7 +284,7 @@ def sched__sched_switch(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(next_pid, next_pid, next_comm)
+		new_task(next_pid, 'unknown', next_comm)
 		task_state[next_pid]['cpu'] = common_cpu
 		task_state[next_pid]['mode'] = 'idle'
 		task_state[next_pid]['resume-mode'] = 'busy-unknown'
@@ -319,7 +323,7 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(pid, pid, comm)
+		new_task(pid, 'unknown', comm)
 		task_state[pid]['cpu'] = orig_cpu
 		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
@@ -355,7 +359,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(old_pid, old_pid, common_comm)
+		new_task(old_pid, 'unknown', common_comm)
 		task_state[old_pid]['cpu'] = common_cpu
 		task_state[old_pid]['mode'] = 'sys'
 		task_state[old_pid]['timestamp'] = start_timestamp
@@ -485,7 +489,7 @@ def print_syscall_totals(tidlist):
 	for pid in sorted(pids):
 		if pid == 0:
 			continue
-		print "%6u:" % (pid)
+		print "%6s:" % (str(pid))
 		proc_user = 0
 		proc_sys = 0
 		proc_idle = 0
