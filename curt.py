@@ -62,6 +62,7 @@ def trace_end():
 			cpu = task_state[task]['cpu']
 			task_state[task]['pending'][id] += delta
 			task_state[task]['sys'][cpu] += delta
+			task_state[task]['runtime'][cpu] += delta
 			debug_print("task %u syscall %s pending time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
 			debug_print("task %u (%s) sys time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['sys'][cpu] - delta, delta, task_state[task]['sys'][cpu]))
 
@@ -69,12 +70,14 @@ def trace_end():
 			delta = curr_timestamp - task_state[task]['timestamp']
 			cpu = task_state[task]['cpu']
 			task_state[task]['user'][cpu] += delta
+			task_state[task]['runtime'][cpu] += delta
 			debug_print("task %u user time %f + %f = %fms" % (task, task_state[task]['user'][cpu] - delta, delta, task_state[task]['user'][cpu]))
 
 		elif task_state[task]['mode'] == 'idle':
 			delta = curr_timestamp - task_state[task]['timestamp']
 			cpu = task_state[task]['cpu']
 			task_state[task]['idle'][cpu] += delta
+			task_state[task]['unaccounted'][cpu] += delta
 			debug_print("task %u idle time %f + %f = %fms" % (task, task_state[task]['idle'][cpu] - delta, delta, task_state[task]['idle'][cpu]))
 			# what if 'resume-mode' isn't set?
 			# ...which is pretty likely if we're here and still 'busy-unknown'
@@ -89,6 +92,7 @@ def trace_end():
 			delta = curr_timestamp - task_state[task]['timestamp']
 			cpu = task_state[task]['cpu']
 			task_state[task]['busy-unknown'][cpu] += delta
+			task_state[task]['unaccounted'][cpu] += delta
 			debug_print("task %u busy-unknown %f + %f = %fms" % (task, task_state[task]['busy-unknown'][cpu] - delta, delta, task_state[task]['busy-unknown'][cpu]))
 
 	print_syscall_totals(task_tids)
@@ -105,6 +109,7 @@ def new_task(tid, pid, comm):
 	task_info[tid]['pid'] = pid
 	task_info[tid]['comm'] = comm
 	task_state[tid]['migrations'] = 0
+	task_state[tid]['sched_stat'] = False
 	task_tids.append(tid);
 
 def new_tid_cpu(tid, cpu):
@@ -115,6 +120,12 @@ def new_tid_cpu(tid, cpu):
 	task_state[tid]['user'][cpu] = 0
 	task_state[tid]['idle'][cpu] = 0
 	task_state[tid]['busy-unknown'][cpu] = 0
+	task_state[tid]['runtime'][cpu] = 0 
+	task_state[tid]['sleep'][cpu] = 0 
+	task_state[tid]['wait'][cpu] = 0 
+	task_state[tid]['blocked'][cpu] = 0 
+	task_state[tid]['iowait'][cpu] = 0 
+	task_state[tid]['unaccounted'][cpu] = 0 
 
 def change_mode(mode, tid, timestamp):
 	cpu = task_state[tid]['cpu']
@@ -277,6 +288,11 @@ def sched__sched_switch(event_name, context, common_cpu,
 	if common_cpu not in task_state[prev_pid]['sys'].keys():
 		new_tid_cpu(prev_pid, common_cpu)
 
+	if task_state[prev_pid]['sched_stat'] == False:
+		task_state[prev_pid]['sched_stat'] = True
+		task_state[prev_pid]['runtime'][common_cpu] = curr_timestamp - start_timestamp
+		debug_print("%7s.%9s runtime = %u" % ("", "", task_state[prev_pid]['runtime'][common_cpu]))
+
 	task_state[prev_pid]['resume-mode'] = task_state[prev_pid]['mode']
 	change_mode('idle', prev_pid, curr_timestamp)
 
@@ -293,6 +309,11 @@ def sched__sched_switch(event_name, context, common_cpu,
 
 	if common_cpu not in task_state[next_pid]['idle'].keys():
 		new_tid_cpu(next_pid, common_cpu)
+
+	if task_state[next_pid]['sched_stat'] == False:
+		task_state[next_pid]['sched_stat'] = True
+		task_state[next_pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp
+		debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[next_pid]['unaccounted'][common_cpu]))
 
 	task_state[next_pid]['cpu'] = common_cpu
 
@@ -397,6 +418,12 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 		task_state[task]['sys'][cpu] = task_state[old_pid]['sys'][cpu]
 		task_state[task]['idle'][cpu] = task_state[old_pid]['idle'][cpu]
 		task_state[task]['busy-unknown'][cpu] = task_state[old_pid]['busy-unknown'][cpu]
+		task_state[task]['runtime'][cpu] = task_state[old_pid]['runtime'][cpu]
+		task_state[task]['sleep'][cpu] = task_state[old_pid]['sleep'][cpu]
+		task_state[task]['wait'][cpu] = task_state[old_pid]['wait'][cpu]
+		task_state[task]['blocked'][cpu] = task_state[old_pid]['blocked'][cpu]
+		task_state[task]['iowait'][cpu] = task_state[old_pid]['iowait'][cpu]
+		task_state[task]['unaccounted'][cpu] = task_state[old_pid]['unaccounted'][cpu]
 	for id in task_state[old_pid]['count'].keys():
 		task_state[task]['count'][id] = task_state[old_pid]['count'][id]
 		task_state[task]['elapsed'][id] = task_state[old_pid]['elapsed'][id]
@@ -413,6 +440,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 	del task_state[old_pid]
 	new_task(common_pid, pid, common_comm)
 	task_state[pid]['mode'] = 'idle'
+	task_state[pid]['sched_stat'] = True
 	task_state[pid]['timestamp'] = curr_timestamp
 	perf_sample_dict['sample']['tid'] = pid
 	EXEC = 11
@@ -437,6 +465,7 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 	new_task(child_pid, common_pid, common_comm)
 	new_tid_cpu(child_pid, common_cpu)
 	task_state[child_pid]['mode'] = 'idle'
+	task_state[child_pid]['sched_stat'] = True
 	task_state[child_pid]['timestamp'] = curr_timestamp
 	CLONE = 120
 	id = CLONE
@@ -470,6 +499,182 @@ def sched__sched_process_exit(event_name, context, common_cpu,
 	if params.debug:
 		print_syscall_totals([common_tid])
 
+def sched__sched_stat_runtime(event_name, context, common_cpu,
+	common_secs, common_nsecs, common_pid, common_comm,
+	common_callchain, comm, pid, runtime, vruntime, 
+		perf_sample_dict):
+	global start_timestamp, curr_timestamp
+	curr_timestamp = nsecs(common_secs,common_nsecs)
+	if (start_timestamp == 0):
+		start_timestamp = curr_timestamp
+
+	debug_print("%7u.%09u sched_stat_runtime(%u,%s,%u,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),runtime,vruntime,task_state[pid]['mode']))
+	if pid not in task_tids:
+		new_task(pid, 'unknown', comm)
+		# time before now should count as "pending runtime"
+		task_state[pid]['timestamp'] = start_timestamp
+		task_state[pid]['cpu'] = common_cpu
+		task_state[pid]['mode'] = 'busy-unknown'
+		task_state[pid]['resume-mode'] = 'busy-unknown'
+		task_state[pid]['busy-unknown'][common_cpu] = 0
+
+	if common_cpu not in task_state[pid]['sys'].keys():
+		new_tid_cpu(pid, common_cpu)
+
+	if task_state[pid]['sched_stat'] == False:
+		task_state[pid]['sched_stat'] = True
+		if runtime > curr_timestamp - start_timestamp:
+			runtime = curr_timestamp - start_timestamp
+		else:
+			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - runtime
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+
+	debug_print("%7s.%9s runtime %u + %u = %u" % ("", "", task_state[pid]['runtime'][common_cpu], runtime, task_state[pid]['runtime'][common_cpu] + runtime))
+	task_state[pid]['runtime'][common_cpu] += runtime
+
+	if params.debug:
+		print_syscall_totals([pid])
+
+def sched__sched_stat_blocked(event_name, context, common_cpu,
+	common_secs, common_nsecs, common_pid, common_comm,
+	common_callchain, comm, pid, delay, perf_sample_dict):
+	global start_timestamp, curr_timestamp
+	curr_timestamp = nsecs(common_secs,common_nsecs)
+	if (start_timestamp == 0):
+		start_timestamp = curr_timestamp
+
+	debug_print("%7u.%09u sched_stat_blocked(%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	if pid not in task_tids:
+		new_task(pid, 'unknown', comm)
+		# time before now should count as "pending blocked"
+		task_state[pid]['timestamp'] = start_timestamp
+		task_state[pid]['cpu'] = common_cpu
+		task_state[pid]['mode'] = 'idle'
+		task_state[pid]['resume-mode'] = 'busy-unknown'
+		task_state[pid]['busy-unknown'][common_cpu] = 0
+
+	if common_cpu not in task_state[pid]['sys'].keys():
+		new_tid_cpu(pid, common_cpu)
+
+	if task_state[pid]['sched_stat'] == False:
+		task_state[pid]['sched_stat'] = True
+		if delay > curr_timestamp - start_timestamp:
+			delay = curr_timestamp - start_timestamp
+		else:
+			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+
+	debug_print("%7s.%9s blocked %u + %u = %u" % ("", "", task_state[pid]['blocked'][common_cpu], delay, task_state[pid]['blocked'][common_cpu] + delay))
+	task_state[pid]['blocked'][common_cpu] += delay
+
+	if params.debug:
+		print_syscall_totals([pid])
+
+def sched__sched_stat_iowait(event_name, context, common_cpu,
+	common_secs, common_nsecs, common_pid, common_comm,
+	common_callchain, comm, pid, delay, perf_sample_dict):
+	global start_timestamp, curr_timestamp
+	curr_timestamp = nsecs(common_secs,common_nsecs)
+	if (start_timestamp == 0):
+		start_timestamp = curr_timestamp
+
+	debug_print("%7u.%09u sched_stat_iowait (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	if pid not in task_tids:
+		new_task(pid, 'unknown', comm)
+		# time before now should count as "pending iowait"
+		task_state[pid]['timestamp'] = start_timestamp
+		task_state[pid]['cpu'] = common_cpu
+		task_state[pid]['mode'] = 'idle'
+		task_state[pid]['resume-mode'] = 'busy-unknown'
+		task_state[pid]['busy-unknown'][common_cpu] = 0
+
+	if common_cpu not in task_state[pid]['sys'].keys():
+		new_tid_cpu(pid, common_cpu)
+
+	if task_state[pid]['sched_stat'] == False:
+		task_state[pid]['sched_stat'] = True
+		if delay > curr_timestamp - start_timestamp:
+			delay = curr_timestamp - start_timestamp
+		else:
+			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+
+	debug_print("%7s.%9s iowait %u + %u = %u" % ("", "", task_state[pid]['iowait'][common_cpu], delay, task_state[pid]['iowait'][common_cpu] + delay))
+	task_state[pid]['iowait'][common_cpu] += delay
+
+	if params.debug:
+		print_syscall_totals([pid])
+
+def sched__sched_stat_wait(event_name, context, common_cpu,
+	common_secs, common_nsecs, common_pid, common_comm,
+	common_callchain, comm, pid, delay, perf_sample_dict):
+	global start_timestamp, curr_timestamp
+	curr_timestamp = nsecs(common_secs,common_nsecs)
+	if (start_timestamp == 0):
+		start_timestamp = curr_timestamp
+
+	debug_print("%7u.%09u sched_stat_wait   (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	if pid not in task_tids:
+		new_task(pid, 'unknown', comm)
+		# time before now should count as "pending wait"
+		task_state[pid]['timestamp'] = start_timestamp
+		task_state[pid]['cpu'] = common_cpu
+		task_state[pid]['mode'] = 'idle'
+		task_state[pid]['resume-mode'] = 'busy-unknown'
+		task_state[pid]['busy-unknown'][common_cpu] = 0
+
+	if common_cpu not in task_state[pid]['sys'].keys():
+		new_tid_cpu(pid, common_cpu)
+
+	if task_state[pid]['sched_stat'] == False:
+		task_state[pid]['sched_stat'] = True
+		if delay > curr_timestamp - start_timestamp:
+			delay = curr_timestamp - start_timestamp
+		else:
+			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+
+	debug_print("%7s.%9s wait %u + %u = %u" % ("", "", task_state[pid]['wait'][common_cpu], delay, task_state[pid]['wait'][common_cpu] + delay))
+	task_state[pid]['wait'][common_cpu] += delay
+
+	if params.debug:
+		print_syscall_totals([pid])
+
+def sched__sched_stat_sleep(event_name, context, common_cpu,
+	common_secs, common_nsecs, common_pid, common_comm,
+	common_callchain, comm, pid, delay, perf_sample_dict):
+	global start_timestamp, curr_timestamp
+	curr_timestamp = nsecs(common_secs,common_nsecs)
+	if (start_timestamp == 0):
+		start_timestamp = curr_timestamp
+
+	debug_print("%7u.%09u sched_stat_sleep  (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	if pid not in task_tids:
+		new_task(pid, 'unknown', comm)
+		# time before now should count as "pending sleep"
+		task_state[pid]['timestamp'] = start_timestamp
+		task_state[pid]['cpu'] = common_cpu
+		task_state[pid]['mode'] = 'idle'
+		task_state[pid]['resume-mode'] = 'busy-unknown'
+		task_state[pid]['busy-unknown'][common_cpu] = 0
+
+	if common_cpu not in task_state[pid]['sys'].keys():
+		new_tid_cpu(pid, common_cpu)
+
+	if task_state[pid]['sched_stat'] == False:
+		task_state[pid]['sched_stat'] = True
+		if delay > curr_timestamp - start_timestamp:
+			delay = curr_timestamp - start_timestamp
+		else:
+			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+
+	debug_print("%7s.%9s sleep %u + %u = %u" % ("", "", task_state[pid]['sleep'][common_cpu], delay, task_state[pid]['sleep'][common_cpu] + delay))
+	task_state[pid]['sleep'][common_cpu] += delay
+
+	if params.debug:
+		print_syscall_totals([pid])
+
 #def trace_unhandled(event_name, context, event_fields_dict):
 #	pass
 
@@ -485,6 +690,12 @@ def print_syscall_totals(tidlist):
 	all_sys = 0
 	all_idle = 0
 	all_busy = 0
+	all_runtime = 0
+	all_sleep = 0
+	all_wait = 0
+	all_blocked = 0
+	all_iowait = 0
+	all_unaccounted = 0
 	all_migrations = 0
 	for pid in sorted(pids):
 		if pid == 0:
@@ -494,14 +705,26 @@ def print_syscall_totals(tidlist):
 		proc_sys = 0
 		proc_idle = 0
 		proc_busy = 0
+		proc_runtime = 0
+		proc_sleep = 0
+		proc_wait = 0
+		proc_blocked = 0
+		proc_iowait = 0
+		proc_unaccounted = 0
 		proc_migrations = 0
 		for task in sorted(tidlist):
 			if task_info[task]['pid'] == pid:
-				print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
+				print "     -- [%8s] %-20s %3s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
 				task_user = 0
 				task_sys = 0
 				task_idle = 0
 				task_busy = 0
+				task_runtime = 0
+				task_sleep = 0
+				task_wait = 0
+				task_blocked = 0
+				task_iowait = 0
+				task_unaccounted = 0
 				task_migrations = task_state[task]['migrations']
 				# each "comm" is delivered as a bytearray:
 				#   the actual command, a null terminator, and garbage
@@ -509,13 +732,19 @@ def print_syscall_totals(tidlist):
 				# so, truncate the bytearray at the null
 				comm = null(task_info[task]['comm'])
 				for cpu in sorted(task_state[task]['sys'].keys()):
-					print "\t[%8s] %-20s %3u %12.6f %12.6f %12.6f %12.6f" % (task, comm, cpu, ns2ms(task_state[task]['user'][cpu]), ns2ms(task_state[task]['sys'][cpu]), ns2ms(task_state[task]['busy-unknown'][cpu]), ns2ms(task_state[task]['idle'][cpu]))
+					print "\t[%8s] %-20s %3u %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % (task, comm, cpu, ns2ms(task_state[task]['user'][cpu]), ns2ms(task_state[task]['sys'][cpu]), ns2ms(task_state[task]['busy-unknown'][cpu]), ns2ms(task_state[task]['idle'][cpu]), ns2ms(task_state[task]['runtime'][cpu]), ns2ms(task_state[task]['sleep'][cpu]), ns2ms(task_state[task]['wait'][cpu]), ns2ms(task_state[task]['blocked'][cpu]), ns2ms(task_state[task]['iowait'][cpu]), ns2ms(task_state[task]['unaccounted'][cpu]))
 					task_user += task_state[task]['user'][cpu]
 					task_sys += task_state[task]['sys'][cpu]
 					task_idle += task_state[task]['idle'][cpu]
 					task_busy += task_state[task]['busy-unknown'][cpu]
 					task_running = task_user + task_sys + task_busy
-				print "\t[%8s] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % (task, comm, ns2ms(task_user), ns2ms(task_sys), ns2ms(task_busy), ns2ms(task_idle), ns2ms(task_running * 100 / (task_running + task_idle)) if task_running > 0 else 0, task_migrations)
+					task_runtime += task_state[task]['runtime'][cpu]
+					task_sleep += task_state[task]['sleep'][cpu]
+					task_wait += task_state[task]['wait'][cpu]
+					task_blocked += task_state[task]['blocked'][cpu]
+					task_iowait += task_state[task]['iowait'][cpu]
+					task_unaccounted += task_state[task]['unaccounted'][cpu]
+				print "\t[%8s] %-20s ALL %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % (task, comm, ns2ms(task_user), ns2ms(task_sys), ns2ms(task_busy), ns2ms(task_idle), ns2ms(task_runtime), ns2ms(task_sleep), ns2ms(task_wait), ns2ms(task_blocked), ns2ms(task_iowait), ns2ms(task_unaccounted), (task_running * 100 / (task_running + task_idle)) if task_running > 0 else 0, task_migrations)
 				print
 				if task_state[task]['count']:
 					print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
@@ -548,19 +777,31 @@ def print_syscall_totals(tidlist):
 				proc_sys += task_sys
 				proc_idle += task_idle
 				proc_busy += task_busy
+				proc_runtime += task_runtime
+				proc_sleep += task_sleep
+				proc_wait += task_wait
+				proc_blocked += task_blocked
+				proc_iowait += task_iowait
+				proc_unaccounted += task_unaccounted
 				proc_migrations += task_migrations
 		all_user += proc_user
 		all_sys += proc_sys
 		all_idle += proc_idle
 		all_busy += proc_busy
+		all_runtime += proc_runtime
+		all_sleep += proc_sleep
+		all_wait += proc_wait
+		all_blocked += proc_blocked
+		all_iowait += proc_iowait
+		all_unaccounted += proc_unaccounted
 		all_migrations += proc_migrations
-		print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
-		print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % ("", ns2ms(proc_user), ns2ms(proc_sys), ns2ms(proc_busy), ns2ms(proc_idle), ns2ms((proc_user + proc_sys + proc_busy) * 100 / (proc_user + proc_sys + proc_busy + proc_idle)) if proc_user + proc_sys + proc_busy > 0 else 0, proc_migrations)
+		print "     -- [%8s] %-20s %3s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
+		print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % ("", ns2ms(proc_user), ns2ms(proc_sys), ns2ms(proc_busy), ns2ms(proc_idle), ns2ms(proc_runtime), ns2ms(proc_sleep), ns2ms(proc_wait), ns2ms(proc_blocked), ns2ms(proc_iowait), ns2ms(proc_unaccounted), ((proc_user + proc_sys + proc_busy) * 100 / (proc_user + proc_sys + proc_busy + proc_idle)) if proc_user + proc_sys + proc_busy > 0 else 0, proc_migrations)
 
 	print
 	print "%6s:" % ("ALL")
-	print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "util", "moves")
-	print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %5.1f%% %6u" % ("", ns2ms(all_user), ns2ms(all_sys), ns2ms(all_busy), ns2ms(all_idle), ns2ms((all_user + all_sys + all_busy) * 100 / (all_user + all_sys + all_busy + all_idle)) if all_user + all_sys + all_busy > 0 else 0, all_migrations)
+	print "     -- [%8s] %-20s %3s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
+	print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % ("", ns2ms(all_user), ns2ms(all_sys), ns2ms(all_busy), ns2ms(all_idle), ns2ms(all_runtime), ns2ms(all_sleep), ns2ms(all_wait), ns2ms(all_blocked), ns2ms(all_iowait), ns2ms(all_unaccounted), ((all_user + all_sys + all_busy) * 100 / (all_user + all_sys + all_busy + all_idle)) if all_user + all_sys + all_busy > 0 else 0, all_migrations)
 	print
 	print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
 	for id in sorted(task_state['ALL']['count'].keys(), key= lambda x: (task_state['ALL']['count'][x], task_state['ALL']['elapsed'][x]), reverse=True):
