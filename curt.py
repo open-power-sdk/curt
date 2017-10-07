@@ -129,6 +129,13 @@ def new_tid_cpu(tid, cpu):
 	task_state[tid]['iowait'][cpu] = 0 
 	task_state[tid]['unaccounted'][cpu] = 0 
 
+def new_task_syscall(tid, id):
+	task_state[tid]['count'][id] = 0
+	task_state[tid]['elapsed'][id] = 0
+	task_state[tid]['min'][id] = 999999999
+	task_state[tid]['max'][id] = 0
+	task_state[tid]['pending'][id] = 0
+
 def change_mode(mode, tid, timestamp):
 	cpu = task_state[tid]['cpu']
 	delta = timestamp - task_state[tid]['timestamp']
@@ -172,11 +179,7 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 	task_state[common_tid]['id'] = id
 	task_state[common_tid]['sys_enter'] = curr_timestamp
 	if id not in task_state[common_tid]['count'].keys():
-		task_state[common_tid]['min'][id] = 999999999
-		task_state[common_tid]['max'][id] = 0
-		task_state[common_tid]['count'][id] = 0
-		task_state[common_tid]['elapsed'][id] = 0
-		task_state[common_tid]['pending'][id] = 0
+		new_task_syscall(common_tid, id)
 	change_mode('sys',common_tid,curr_timestamp)
 
 	if params.debug:
@@ -216,11 +219,7 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 		pending = True
 
 	if id not in task_state[common_tid]['count'].keys():
-		task_state[common_tid]['count'][id] = 0
-		task_state[common_tid]['elapsed'][id] = 0
-		task_state[common_tid]['pending'][id] = 0
-		task_state[common_tid]['min'][id] = 999999999
-		task_state[common_tid]['max'][id] = 0
+		new_task_syscall(common_tid, id)
 
 	# commented out because sometimes syscalls, like futex, go idle (sched_switch),
 	# then the next event is sys_exit
@@ -455,11 +454,7 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 	task_state[child_pid]['resume-mode'] = 'sys'
 	task_state[child_pid]['id'] = id
 	task_state[child_pid]['sys_enter'] = curr_timestamp
-	task_state[child_pid]['min'][id] = 999999999
-	task_state[child_pid]['max'][id] = 0
-	task_state[child_pid]['count'][id] = 0
-	task_state[child_pid]['elapsed'][id] = 0
-	task_state[child_pid]['pending'][id] = 0
+	new_task_syscall(child_pid, id)
 
 	if params.debug:
 		print_syscall_totals([common_tid, child_pid])
@@ -731,11 +726,7 @@ def print_syscall_totals(tidlist):
 						else:
 							print " %12s %12s %12s" % ("--", "--", "--")
 						if id not in task_state['ALL']['count'].keys():
-							task_state['ALL']['count'][id] = 0
-							task_state['ALL']['elapsed'][id] = 0
-							task_state['ALL']['pending'][id] = 0
-							task_state['ALL']['max'][id] = 0
-							task_state['ALL']['min'][id] = 999999999
+							new_task_syscall('ALL', id)
 						task_state['ALL']['count'][id] += count
 						task_state['ALL']['elapsed'][id] += elapsed
 						task_state['ALL']['pending'][id] += pending
