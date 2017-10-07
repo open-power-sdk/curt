@@ -103,11 +103,13 @@ curr_timestamp = 0
 def ns2ms(nsecs):
 	return nsecs * 0.000001
 
-def new_task(tid, pid, comm):
+def new_task(tid, pid, comm, timestamp, mode):
 	if tid != 0:
 		debug_print("new task %u (%s:%s)" % (tid, str(pid), null(comm)))
 	task_info[tid]['pid'] = pid
 	task_info[tid]['comm'] = comm
+	task_state[tid]['timestamp'] = timestamp
+	task_state[tid]['mode'] = mode
 	task_state[tid]['migrations'] = 0
 	task_state[tid]['sched_stat'] = False
 	task_tids.append(tid);
@@ -148,10 +150,8 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 	debug_print("%07u.%09u %9s %d:%d [%d] %s" % (common_secs, common_nsecs, 'enter', common_pid, common_tid, common_cpu, syscall_name(id)))
 
 	if common_tid not in task_tids:
-		new_task(common_tid, common_pid, common_comm)
+		new_task(common_tid, common_pid, common_comm, start_timestamp, 'user')
 		# time before now should count as "pending user"
-		task_state[task]['timestamp'] = start_timestamp
-		task_state[task]['mode'] = 'user'
 	elif task_info[common_tid]['pid'] == 'unknown':
 		task_info[common_tid]['pid'] = common_pid
 
@@ -195,11 +195,9 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 
 	pending = False
 	if common_tid not in task_tids:
-		new_task(common_tid, common_pid, common_comm)
+		new_task(common_tid, common_pid, common_comm, start_timestamp, 'sys')
 		task_state[common_tid]['cpu'] = common_cpu
-		task_state[common_tid]['mode'] = 'sys'
 		task_state[common_tid]['id'] = id
-		task_state[common_tid]['timestamp'] = start_timestamp
 		pending = True
 	elif task_info[common_tid]['pid'] == 'unknown':
 		task_info[common_tid]['pid'] = common_pid
@@ -278,11 +276,9 @@ def sched__sched_switch(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(prev_pid, 'unknown', prev_comm)
+		new_task(prev_pid, 'unknown', prev_comm, start_timestamp, 'busy-unknown')
 		task_state[prev_pid]['cpu'] = common_cpu
-		task_state[prev_pid]['mode'] = 'busy-unknown'
 		task_state[prev_pid]['resume-mode'] = 'busy-unknown'
-		task_state[prev_pid]['timestamp'] = start_timestamp
 		task_state[prev_pid]['busy-unknown'][common_cpu] = 0
 
 	if common_cpu not in task_state[prev_pid]['sys'].keys():
@@ -300,11 +296,9 @@ def sched__sched_switch(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(next_pid, 'unknown', next_comm)
+		new_task(next_pid, 'unknown', next_comm, start_timestamp, 'idle')
 		task_state[next_pid]['cpu'] = common_cpu
-		task_state[next_pid]['mode'] = 'idle'
 		task_state[next_pid]['resume-mode'] = 'busy-unknown'
-		task_state[next_pid]['timestamp'] = start_timestamp
 		task_state[next_pid]['busy-unknown'][common_cpu] = 0
 
 	if common_cpu not in task_state[next_pid]['idle'].keys():
@@ -344,11 +338,9 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(pid, 'unknown', comm)
+		new_task(pid, 'unknown', comm, start_timestamp, 'idle')
 		task_state[pid]['cpu'] = orig_cpu
-		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
-		task_state[pid]['timestamp'] = start_timestamp
 		task_state[pid]['busy-unknown'][orig_cpu] = 0
 
 	if orig_cpu not in task_state[pid]['sys'].keys():
@@ -380,10 +372,8 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 		# I don't have a real PID here... hmm
 		# new_task(next_pid, ?, next_comm)
 		# self-parenting for now...
-		new_task(old_pid, 'unknown', common_comm)
+		new_task(old_pid, 'unknown', common_comm, start_timestamp, 'sys')
 		task_state[old_pid]['cpu'] = common_cpu
-		task_state[old_pid]['mode'] = 'sys'
-		task_state[old_pid]['timestamp'] = start_timestamp
 		task_state[old_pid]['sys'][common_cpu] = 0
 		task_state[old_pid]['user'][common_cpu] = 0
 		task_state[old_pid]['idle'][common_cpu] = 0
@@ -438,10 +428,8 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 	del task_info[old_pid]
 	task_tids.remove(old_pid)
 	del task_state[old_pid]
-	new_task(common_pid, pid, common_comm)
-	task_state[pid]['mode'] = 'idle'
+	new_task(common_pid, pid, common_comm, curr_timestamp, 'idle')
 	task_state[pid]['sched_stat'] = True
-	task_state[pid]['timestamp'] = curr_timestamp
 	perf_sample_dict['sample']['tid'] = pid
 	EXEC = 11
 	# args is not used by the caller, or we're in trouble
@@ -462,11 +450,9 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 
 	debug_print("%07u.%09u %9s [%u:%u] [%u] (parent_pid=%u)" % (common_secs, common_nsecs, 'fork', common_pid, common_tid, child_pid, parent_pid))
 
-	new_task(child_pid, common_pid, common_comm)
+	new_task(child_pid, common_pid, common_comm, curr_timestamp, 'idle')
 	new_tid_cpu(child_pid, common_cpu)
-	task_state[child_pid]['mode'] = 'idle'
 	task_state[child_pid]['sched_stat'] = True
-	task_state[child_pid]['timestamp'] = curr_timestamp
 	CLONE = 120
 	id = CLONE
 	task_state[child_pid]['cpu'] = common_cpu
@@ -510,11 +496,9 @@ def sched__sched_stat_runtime(event_name, context, common_cpu,
 
 	debug_print("%7u.%09u sched_stat_runtime(%u,%s,%u,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),runtime,vruntime,task_state[pid]['mode']))
 	if pid not in task_tids:
-		new_task(pid, 'unknown', comm)
+		new_task(pid, 'unknown', comm, start_timestamp, 'busy-unknown')
 		# time before now should count as "pending runtime"
-		task_state[pid]['timestamp'] = start_timestamp
 		task_state[pid]['cpu'] = common_cpu
-		task_state[pid]['mode'] = 'busy-unknown'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
 		task_state[pid]['busy-unknown'][common_cpu] = 0
 
@@ -545,11 +529,9 @@ def sched__sched_stat_blocked(event_name, context, common_cpu,
 
 	debug_print("%7u.%09u sched_stat_blocked(%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
 	if pid not in task_tids:
-		new_task(pid, 'unknown', comm)
+		new_task(pid, 'unknown', comm, start_timestamp, 'idle')
 		# time before now should count as "pending blocked"
-		task_state[pid]['timestamp'] = start_timestamp
 		task_state[pid]['cpu'] = common_cpu
-		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
 		task_state[pid]['busy-unknown'][common_cpu] = 0
 
@@ -580,11 +562,9 @@ def sched__sched_stat_iowait(event_name, context, common_cpu,
 
 	debug_print("%7u.%09u sched_stat_iowait (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
 	if pid not in task_tids:
-		new_task(pid, 'unknown', comm)
+		new_task(pid, 'unknown', comm, start_timestamp, 'idle')
 		# time before now should count as "pending iowait"
-		task_state[pid]['timestamp'] = start_timestamp
 		task_state[pid]['cpu'] = common_cpu
-		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
 		task_state[pid]['busy-unknown'][common_cpu] = 0
 
@@ -615,11 +595,9 @@ def sched__sched_stat_wait(event_name, context, common_cpu,
 
 	debug_print("%7u.%09u sched_stat_wait   (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
 	if pid not in task_tids:
-		new_task(pid, 'unknown', comm)
+		new_task(pid, 'unknown', comm, start_timestamp, 'idle')
 		# time before now should count as "pending wait"
-		task_state[pid]['timestamp'] = start_timestamp
 		task_state[pid]['cpu'] = common_cpu
-		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
 		task_state[pid]['busy-unknown'][common_cpu] = 0
 
@@ -650,11 +628,9 @@ def sched__sched_stat_sleep(event_name, context, common_cpu,
 
 	debug_print("%7u.%09u sched_stat_sleep  (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
 	if pid not in task_tids:
-		new_task(pid, 'unknown', comm)
+		new_task(pid, 'unknown', comm, start_timestamp, 'idle')
 		# time before now should count as "pending sleep"
-		task_state[pid]['timestamp'] = start_timestamp
 		task_state[pid]['cpu'] = common_cpu
-		task_state[pid]['mode'] = 'idle'
 		task_state[pid]['resume-mode'] = 'busy-unknown'
 		task_state[pid]['busy-unknown'][common_cpu] = 0
 
