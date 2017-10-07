@@ -141,19 +141,18 @@ def change_mode(mode, tid, timestamp):
 
 def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, perf_sample_dict):
 	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %9s %d:%d [%d] %s" % (common_secs, common_nsecs, 'enter', common_pid, common_tid, common_cpu, syscall_name(id)))
+	debug_print("%07u.%09u %9s %u [%03u] %s" % (common_secs, common_nsecs, 'enter', common_tid, common_cpu, syscall_name(id)))
 
 	if common_tid not in task_tids:
-		new_task(common_tid, common_pid, common_comm, start_timestamp, 'user')
+		new_task(common_tid, perf_sample_dict['sample']['pid'], common_comm, start_timestamp, 'user')
 		# time before now should count as "pending user"
 	elif task_info[common_tid]['pid'] == 'unknown':
-		task_info[common_tid]['pid'] = common_pid
+		task_info[common_tid]['pid'] = perf_sample_dict['sample']['pid']
 
 	if common_cpu not in task_state[common_tid]['sys'].keys():
 		new_tid_cpu(common_tid, common_cpu)
@@ -185,22 +184,21 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 
 def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
 	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %9s %u:%u [%u] %u:%s" % (common_secs, common_nsecs, 'exit', common_pid, common_tid, common_cpu, id, syscall_name(id)))
+	debug_print("%07u.%09u %9s %u [%03u] %u:%s" % (common_secs, common_nsecs, 'exit', common_tid, common_cpu, id, syscall_name(id)))
 
 	pending = False
 	if common_tid not in task_tids:
-		new_task(common_tid, common_pid, common_comm, start_timestamp, 'sys')
+		new_task(common_tid, perf_sample_dict['sample']['pid'], common_comm, start_timestamp, 'sys')
 		task_state[common_tid]['cpu'] = common_cpu
 		task_state[common_tid]['id'] = id
 		pending = True
 	elif task_info[common_tid]['pid'] == 'unknown':
-		task_info[common_tid]['pid'] = common_pid
+		task_info[common_tid]['pid'] = perf_sample_dict['sample']['pid']
 
 	# sched_setaffinity, at least, can migrate a task without triggering
 	# a sched_migrate_task event
@@ -264,7 +262,6 @@ def sched__sched_switch(event_name, context, common_cpu,
 	common_callchain, prev_comm, prev_pid, prev_prio, prev_state, 
 	next_comm, next_pid, next_prio, perf_sample_dict):
 	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -323,7 +320,6 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 	common_callchain, comm, pid, prio, orig_cpu, 
 	dest_cpu, perf_sample_dict):
 	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -472,7 +468,6 @@ def sched__sched_process_exit(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, perf_sample_dict):
 	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
