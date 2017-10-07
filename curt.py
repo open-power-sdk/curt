@@ -140,8 +140,8 @@ def change_mode(mode, tid, timestamp):
 	task_state[tid]['timestamp'] = timestamp
 
 def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -184,8 +184,8 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 		print_syscall_totals([common_tid])
 
 def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -263,8 +263,8 @@ def sched__sched_switch(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, prev_comm, prev_pid, prev_prio, prev_state, 
 	next_comm, next_pid, next_prio, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -322,8 +322,8 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, orig_cpu, 
 	dest_cpu, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -359,8 +359,8 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 def sched__sched_process_exec(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, filename, pid, old_pid, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -441,8 +441,8 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 def sched__sched_process_fork(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, parent_comm, parent_pid, child_comm, child_pid, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
@@ -471,8 +471,8 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 def sched__sched_process_exit(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, perf_sample_dict):
+	common_tid = common_pid
 	common_pid = perf_sample_dict['sample']['pid']
-	common_tid = perf_sample_dict['sample']['tid']
 	global start_timestamp, curr_timestamp
 	curr_timestamp = nsecs(common_secs,common_nsecs)
 	if (start_timestamp == 0):
