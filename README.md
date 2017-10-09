@@ -32,9 +32,25 @@ Currently, the only project file used in processing is `curt.py`.  One could dow
    * Ubuntu still needs perf's python scripting enabled
    * Building your own version of perf:
      * clone kernel source...
+       ```
+       $ git clone --depth 1 --single-branch -b perf/core https://git.kernel.org/pub/scm/linux/kernel/git/acme/linux.git perf
+       ```
      * install pre-requisites...
-     * build perf...
-     * install perf...
+     * set up...
+       ```
+       $ cd perf
+       $ cp -p arch/powerpc/configs/powernv_defconfig ./.config
+       $ make oldconfig < /dev/null
+       ```
+     * build & install perf...
+       ```
+       $ cd tools/perf
+       $ make prefix=~/install install
+       ```
+     * prepare to use new perf
+       ```
+       export PATH=~/install/bin:$PATH
+       ```
 
 1. If you wish to run perf as a non-root user, you'll need superuser authority to set some things up:
    1. Make sure you have read/write access to `/sys/kernel/debug/tracing`:
