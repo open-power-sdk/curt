@@ -445,16 +445,20 @@ def sched__sched_stat_runtime(event_name, context, common_cpu,
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
+	# sched_stat events can occur on any cpu
+	# so make sure this doesn't look like a migration
+	cpu = task_state[pid]['cpu']
+
 	if task_state[pid]['sched_stat'] == False:
 		task_state[pid]['sched_stat'] = True
 		if runtime > curr_timestamp - start_timestamp:
 			runtime = curr_timestamp - start_timestamp
 		else:
-			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - runtime
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - runtime
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s runtime %u + %u = %u" % ("", "", task_state[pid]['runtime'][common_cpu], runtime, task_state[pid]['runtime'][common_cpu] + runtime))
-	task_state[pid]['runtime'][common_cpu] += runtime
+	debug_print("%7s.%9s runtime %u + %u = %u" % ("", "", task_state[pid]['runtime'][cpu], runtime, task_state[pid]['runtime'][cpu] + runtime))
+	task_state[pid]['runtime'][cpu] += runtime
 
 	if params.debug:
 		print_syscall_totals([pid])
@@ -471,16 +475,20 @@ def sched__sched_stat_blocked(event_name, context, common_cpu,
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
+	# sched_stat events can occur on any cpu
+	# so make sure this doesn't look like a migration
+	cpu = task_state[pid]['cpu']
+
 	if task_state[pid]['sched_stat'] == False:
 		task_state[pid]['sched_stat'] = True
 		if delay > curr_timestamp - start_timestamp:
 			delay = curr_timestamp - start_timestamp
 		else:
-			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s blocked %u + %u = %u" % ("", "", task_state[pid]['blocked'][common_cpu], delay, task_state[pid]['blocked'][common_cpu] + delay))
-	task_state[pid]['blocked'][common_cpu] += delay
+	debug_print("%7s.%9s blocked %u + %u = %u" % ("", "", task_state[pid]['blocked'][cpu], delay, task_state[pid]['blocked'][cpu] + delay))
+	task_state[pid]['blocked'][cpu] += delay
 
 	if params.debug:
 		print_syscall_totals([pid])
@@ -497,16 +505,20 @@ def sched__sched_stat_iowait(event_name, context, common_cpu,
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
+	# sched_stat events can occur on any cpu
+	# so make sure this doesn't look like a migration
+	cpu = task_state[pid]['cpu']
+
 	if task_state[pid]['sched_stat'] == False:
 		task_state[pid]['sched_stat'] = True
 		if delay > curr_timestamp - start_timestamp:
 			delay = curr_timestamp - start_timestamp
 		else:
-			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s iowait %u + %u = %u" % ("", "", task_state[pid]['iowait'][common_cpu], delay, task_state[pid]['iowait'][common_cpu] + delay))
-	task_state[pid]['iowait'][common_cpu] += delay
+	debug_print("%7s.%9s iowait %u + %u = %u" % ("", "", task_state[pid]['iowait'][cpu], delay, task_state[pid]['iowait'][cpu] + delay))
+	task_state[pid]['iowait'][cpu] += delay
 
 	if params.debug:
 		print_syscall_totals([pid])
@@ -523,16 +535,20 @@ def sched__sched_stat_wait(event_name, context, common_cpu,
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
+	# sched_stat events can occur on any cpu
+	# so make sure this doesn't look like a migration
+	cpu = task_state[pid]['cpu']
+
 	if task_state[pid]['sched_stat'] == False:
 		task_state[pid]['sched_stat'] = True
 		if delay > curr_timestamp - start_timestamp:
 			delay = curr_timestamp - start_timestamp
 		else:
-			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s wait %u + %u = %u" % ("", "", task_state[pid]['wait'][common_cpu], delay, task_state[pid]['wait'][common_cpu] + delay))
-	task_state[pid]['wait'][common_cpu] += delay
+	debug_print("%7s.%9s wait %u + %u = %u" % ("", "", task_state[pid]['wait'][cpu], delay, task_state[pid]['wait'][cpu] + delay))
+	task_state[pid]['wait'][cpu] += delay
 
 	if params.debug:
 		print_syscall_totals([pid])
@@ -549,16 +565,20 @@ def sched__sched_stat_sleep(event_name, context, common_cpu,
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
+	# sched_stat events can occur on any cpu
+	# so make sure this doesn't look like a migration
+	cpu = task_state[pid]['cpu']
+
 	if task_state[pid]['sched_stat'] == False:
 		task_state[pid]['sched_stat'] = True
 		if delay > curr_timestamp - start_timestamp:
 			delay = curr_timestamp - start_timestamp
 		else:
-			task_state[pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][common_cpu]))
+			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
+			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s sleep %u + %u = %u" % ("", "", task_state[pid]['sleep'][common_cpu], delay, task_state[pid]['sleep'][common_cpu] + delay))
-	task_state[pid]['sleep'][common_cpu] += delay
+	debug_print("%7s.%9s sleep %u + %u = %u" % ("", "", task_state[pid]['sleep'][cpu], delay, task_state[pid]['sleep'][cpu] + delay))
+	task_state[pid]['sleep'][cpu] += delay
 
 	if params.debug:
 		print_syscall_totals([pid])
