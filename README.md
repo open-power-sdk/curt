@@ -4,6 +4,7 @@ This project calculates utilization statistics:
 2. Idle time is broken down into sleep, wait, blocked, and I/O wait
 3. System time is further divided among syscalls, with an invocation count, elapsed time, running (system) time, idle time, minimum, maximum, and average call duration
 4. Task migrations
+5. Hypervisor calls are tracked per task, per process, and system wide, with invocation count, elapsed time, running (system) time, minimum, maximum, and average call duration
 
 The current implementation is based on collecting trace data using "perf", and post-processing the data using perf's python scripting capabilities.
 
@@ -73,7 +74,7 @@ Currently, the only project file used in processing is `curt.py`.  One could dow
 ### Collect trace data
 1. Simple!
 ```
-    perf record -e '{raw_syscalls:*,sched:sched_switch,sched:sched_migrate_task,sched:sched_process_exec,sched:sched_process_fork,sched:sched_process_exit,sched:sched_stat_runtime,sched:sched_stat_wait,sched:sched_stat_sleep,sched:sched_stat_blocked,sched:sched_stat_iowait}' -a *command --args*
+    perf record -e '{raw_syscalls:*,sched:sched_switch,sched:sched_migrate_task,sched:sched_process_exec,sched:sched_process_fork,sched:sched_process_exit,sched:sched_stat_runtime,sched:sched_stat_wait,sched:sched_stat_sleep,sched:sched_stat_blocked,sched:sched_stat_iowait,powerpc:hcall_entry,powerpc:hcall_exit}' -a *command --args*
 ```
 
 ### Process trace data
