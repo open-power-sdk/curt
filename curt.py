@@ -267,14 +267,14 @@ def new_tid_cpu(tid, cpu):
 def new_task_syscall(tid, id):
 	task_state[tid]['count'][id] = 0
 	task_state[tid]['elapsed'][id] = 0
-	task_state[tid]['min'][id] = 999999999
+	task_state[tid]['min'][id] = sys.maxint
 	task_state[tid]['max'][id] = 0
 	task_state[tid]['pending'][id] = 0
 
 def new_task_hcall(tid, opcode):
 	task_state[tid]['count_hv'][opcode] = 0
 	task_state[tid]['elapsed_hv'][opcode] = 0
-	task_state[tid]['min_hv'][opcode] = 999999999
+	task_state[tid]['min_hv'][opcode] = sys.maxint
 	task_state[tid]['max_hv'][opcode] = 0
 	task_state[tid]['pending_hv'][opcode] = 0
 
