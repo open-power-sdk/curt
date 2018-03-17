@@ -48,60 +48,60 @@ def null(ba):
 	return ba
 
 hcall_to_name = {
-	'0x4':'H_REMOVE',           
+	'0x4':'H_REMOVE',
 	'0x8':'H_ENTER',      
 	'0xc':'H_READ',      
 	'0x10':'H_CLEAR_MOD', 
 	'0x14':'H_CLEAR_REF', 
 	'0x18':'H_PROTECT', 
-	'0x1c':'H_GET_TCE',               
-	'0x20':'H_PUT_TCE',               
-	'0x24':'H_SET_SPRG0',               
-	'0x28':'H_SET_DABR',               
-	'0x2c':'H_PAGE_INIT',               
-	'0x30':'H_SET_ASR',               
-	'0x34':'H_ASR_ON',               
-	'0x38':'H_ASR_OFF',               
-	'0x3c':'H_LOGICAL_CI_LOAD',                   
-	'0x40':'H_LOGICAL_CI_STORE',                   
-	'0x44':'H_LOGICAL_CACHE_LOAD',                       
-	'0x48':'H_LOGICAL_CACHE_STORE',                    
-	'0x4c':'H_LOGICAL_ICBI',               
-	'0x50':'H_LOGICAL_DCBF',               
-	'0x54':'H_GET_TERM_CHAR',               
-	'0x58':'H_PUT_TERM_CHAR',               
-	'0x5c':'H_REAL_TO_LOGICAL',                   
-	'0x60':'H_HYPERVISOR_DATA',                   
-	'0x64':'H_EOI',           
-	'0x68':'H_CPPR',           
-	'0x6c':'H_IPI',           
-	'0x70':'H_IPOLL',           
-	'0x74':'H_XIRR',           
-	'0x78':'H_MIGRATE_DMA',               
-	'0x7c':'H_PERFMON',               
-	'0xdc':'H_REGISTER_VPA',               
-	'0xe0':'H_CEDE',           
-	'0xe4':'H_CONFER',               
-	'0xe8':'H_PROD',           
-	'0xec':'H_GET_PPP',               
-	'0xf0':'H_SET_PPP',               
-	'0xf4':'H_PURR',           
-	'0xf8':'H_PIC',           
-	'0xfc':'H_REG_CRQ',               
+	'0x1c':'H_GET_TCE',
+	'0x20':'H_PUT_TCE',
+	'0x24':'H_SET_SPRG0',
+	'0x28':'H_SET_DABR',
+	'0x2c':'H_PAGE_INIT',
+	'0x30':'H_SET_ASR',
+	'0x34':'H_ASR_ON',
+	'0x38':'H_ASR_OFF',
+	'0x3c':'H_LOGICAL_CI_LOAD',
+	'0x40':'H_LOGICAL_CI_STORE',
+	'0x44':'H_LOGICAL_CACHE_LOAD',
+	'0x48':'H_LOGICAL_CACHE_STORE',
+	'0x4c':'H_LOGICAL_ICBI',
+	'0x50':'H_LOGICAL_DCBF',
+	'0x54':'H_GET_TERM_CHAR',
+	'0x58':'H_PUT_TERM_CHAR',
+	'0x5c':'H_REAL_TO_LOGICAL',
+	'0x60':'H_HYPERVISOR_DATA',
+	'0x64':'H_EOI',
+	'0x68':'H_CPPR',
+	'0x6c':'H_IPI',
+	'0x70':'H_IPOLL',
+	'0x74':'H_XIRR',
+	'0x78':'H_MIGRATE_DMA',
+	'0x7c':'H_PERFMON',
+	'0xdc':'H_REGISTER_VPA',
+	'0xe0':'H_CEDE',
+	'0xe4':'H_CONFER',
+	'0xe8':'H_PROD',
+	'0xec':'H_GET_PPP',
+	'0xf0':'H_SET_PPP',
+	'0xf4':'H_PURR',
+	'0xf8':'H_PIC',
+	'0xfc':'H_REG_CRQ',
 	'0x100':'H_FREE_CRQ',      
 	'0x104':'H_VIO_SIGNAL',      
 	'0x108':'H_SEND_CRQ',      
 	'0x110':'H_COPY_RDMA',      
 	'0x114':'H_REGISTER_LOGICAL_LAN',       
 	'0x118':'H_FREE_LOGICAL_LAN',       
-	'0x11c':'H_ADD_LOGICAL_LAN_BUFFER',           
+	'0x11c':'H_ADD_LOGICAL_LAN_BUFFER',
 	'0x120':'H_SEND_LOGICAL_LAN',       
 	'0x124':'H_BULK_REMOVE',      
 	'0x130':'H_MULTICAST_CTRL',       
 	'0x134':'H_SET_XDABR',      
 	'0x138':'H_STUFF_TCE',      
 	'0x13c':'H_PUT_TCE_INDIRECT',       
-	'0x14c':'H_CHANGE_LOGICAL_LAN_MAC',           
+	'0x14c':'H_CHANGE_LOGICAL_LAN_MAC',
 	'0x150':'H_VTERM_PARTNER_INFO',       
 	'0x154':'H_REGISTER_VTERM',       
 	'0x158':'H_FREE_VTERM',      
@@ -131,7 +131,7 @@ hcall_to_name = {
 	'0x1b8':'H_GET_HCA_INFO',      
 	'0x1bc':'H_GET_PERF_COUNT',       
 	'0x1c0':'H_MANAGE_TRACE',      
-	'0x1d4':'H_FREE_LOGICAL_LAN_BUFFER',           
+	'0x1d4':'H_FREE_LOGICAL_LAN_BUFFER',
 	'0x1d8':'H_POLL_PENDING',      
 	'0x1e4':'H_QUERY_INT_STATE',       
 	'0x244':'H_ILLAN_ATTRIBUTES',       
@@ -186,8 +186,8 @@ def trace_end():
 			task_state[task]['pending'][id] += delta
 			task_state[task]['sys'][cpu] += delta
 			task_state[task]['runtime'][cpu] += delta
-			debug_print("task %u syscall %s pending time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
-			debug_print("task %u (%s) sys time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['sys'][cpu] - delta, delta, task_state[task]['sys'][cpu]))
+			debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task_info[task]['pid']), task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
+			debug_print("task %7s/%06u (%s) sys time %f + %f = %fms" % (str(task_info[task]['pid']), task, syscall_name(id), task_state[task]['sys'][cpu] - delta, delta, task_state[task]['sys'][cpu]))
 		
 		elif task_state[task]['mode'] == 'hv':
 			delta = curr_timestamp - task_state[task]['hcall_enter']
@@ -196,22 +196,22 @@ def trace_end():
 			task_state[task]['pending_hv'][opcode] += delta
 			task_state[task]['hv'][cpu] += delta
 			task_state[task]['runtime'][cpu] += delta
-			debug_print("task %u hcall %s pending time %f + %f = %fms" % (task, hcall_name(opcode), task_state[task]['pending_hv'][opcode] - delta, delta, task_state[task]['pending_hv'][opcode]))
-			debug_print("task %u (%s) hcall time %f + %f = %fms" % (task, hcall_name(opcode), task_state[task]['hv'][cpu] - delta, delta, task_state[task]['hv'][cpu]))
+			debug_print("task %7s/%06u hcall %s pending time %f + %f = %fms" % (str(task_info[task]['pid']), task, hcall_name(opcode), task_state[task]['pending_hv'][opcode] - delta, delta, task_state[task]['pending_hv'][opcode]))
+			debug_print("task %7s/%06u (%s) hcall time %f + %f = %fms" % (str(task_info[task]['pid']), task, hcall_name(opcode), task_state[task]['hv'][cpu] - delta, delta, task_state[task]['hv'][cpu]))
 
 		elif task_state[task]['mode'] == 'user':
 			delta = curr_timestamp - task_state[task]['timestamp']
 			cpu = task_state[task]['cpu']
 			task_state[task]['user'][cpu] += delta
 			task_state[task]['runtime'][cpu] += delta
-			debug_print("task %u user time %f + %f = %fms" % (task, task_state[task]['user'][cpu] - delta, delta, task_state[task]['user'][cpu]))
+			debug_print("task %7s/%06u user time %f + %f = %fms" % (str(task_info[task]['pid']), task, task_state[task]['user'][cpu] - delta, delta, task_state[task]['user'][cpu]))
 
 		elif task_state[task]['mode'] == 'idle':
 			delta = curr_timestamp - task_state[task]['timestamp']
 			cpu = task_state[task]['cpu']
 			task_state[task]['idle'][cpu] += delta
 			task_state[task]['unaccounted'][cpu] += delta
-			debug_print("task %u idle time %f + %f = %fms" % (task, task_state[task]['idle'][cpu] - delta, delta, task_state[task]['idle'][cpu]))
+			debug_print("task %7s/%06u idle time %f + %f = %fms" % (str(task_info[task]['pid']), task, task_state[task]['idle'][cpu] - delta, delta, task_state[task]['idle'][cpu]))
 			# what if 'resume-mode' isn't set?
 			# ...which is pretty likely if we're here and still 'busy-unknown'
 			if task_state[task]['resume-mode'] == 'sys':
@@ -219,14 +219,14 @@ def trace_end():
 				id = task_state[task]['id']
 				cpu = task_state[task]['cpu']
 				task_state[task]['pending'][id] += delta
-				debug_print("task %u syscall %s pending time %f + %f = %fms" % (task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
+				debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task_info[task]['pid']), task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
 
 		elif task_state[task]['mode'] == 'busy-unknown':
 			delta = curr_timestamp - task_state[task]['timestamp']
 			cpu = task_state[task]['cpu']
 			task_state[task]['busy-unknown'][cpu] += delta
 			task_state[task]['unaccounted'][cpu] += delta
-			debug_print("task %u busy-unknown %f + %f = %fms" % (task, task_state[task]['busy-unknown'][cpu] - delta, delta, task_state[task]['busy-unknown'][cpu]))
+			debug_print("task %7s/%06u busy-unknown %f + %f = %fms" % (str(task_info[task]['pid']), task, task_state[task]['busy-unknown'][cpu] - delta, delta, task_state[task]['busy-unknown'][cpu]))
 
 	print_syscall_totals(task_tids)
 
@@ -238,7 +238,7 @@ def ns2ms(nsecs):
 
 def new_task(tid, pid, comm, timestamp, mode):
 	if tid != 0:
-		debug_print("new task %u (%s:%s)" % (tid, str(pid), null(comm)))
+		debug_print("\tnew task %7s/%06u (%s)" % (str(pid), tid, null(comm)))
 	task_info[tid]['pid'] = pid
 	task_info[tid]['comm'] = comm
 	task_state[tid]['timestamp'] = timestamp
@@ -250,7 +250,7 @@ def new_task(tid, pid, comm, timestamp, mode):
 
 def new_tid_cpu(tid, cpu):
 	if tid != 0:
-		debug_print("new CPU %d for task %u" % (cpu, tid))
+		debug_print("\tnew CPU %d for task %7s/%06u" % (cpu, str(task_info[tid]['pid']), tid))
 	task_state[tid]['cpu'] = cpu
 	task_state[tid]['sys'][cpu] = 0
 	task_state[tid]['user'][cpu] = 0
@@ -283,8 +283,8 @@ def change_mode(mode, tid, timestamp):
 	delta = timestamp - task_state[tid]['timestamp']
 	task_state[tid][task_state[tid]['mode']][cpu] += delta
 	if tid != 0:
-		debug_print("task %s %s(%u) = %u + %u = %u" % (tid, task_state[tid]['mode'], cpu, task_state[tid][task_state[tid]['mode']][cpu] - delta, delta, task_state[tid][task_state[tid]['mode']][cpu]))
-		debug_print("task %s now %s" % (tid, mode))
+		debug_print("\ttask %7s/%06u %s(%u) = %u + %u = %u" % (str(task_info[tid]['pid']), tid, task_state[tid]['mode'], cpu, task_state[tid][task_state[tid]['mode']][cpu] - delta, delta, task_state[tid][task_state[tid]['mode']][cpu]))
+		debug_print("\ttask %7s/%06u now %s" % (str(task_info[tid]['pid']), tid, mode))
 	task_state[tid]['mode'] = mode
 	task_state[tid]['timestamp'] = timestamp
 
@@ -295,7 +295,7 @@ def get_unknown(perf_sample_dict):
 	return 'unknown'
 
 def generic_event(event_name, cpu, timestamp, tid, comm, mode, getpid, perf_sample_dict):
-	debug_print("%016u %6u [%03u] %-32s" % (timestamp, tid, cpu, event_name))
+	debug_print("%016u %7s/%06u [%03u] %-32s" % (timestamp, str(task_info[tid]['pid']), tid, cpu, event_name))
 
 	if tid not in task_tids:
 		new_task(tid, getpid(perf_sample_dict), comm, timestamp, mode)
@@ -314,7 +314,7 @@ def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s %u [%03u] %s" % (common_secs, common_nsecs, 'sys_enter', common_tid, common_cpu, syscall_name(id)))
+	debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (curr_timestamp, 'sys_enter', str(task_info[common_tid]['pid']), common_tid, common_cpu, id, syscall_name(id)))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
 
@@ -345,7 +345,7 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s %u [%03u] %u:%s" % (common_secs, common_nsecs, 'sys_exit', common_tid, common_cpu, id, syscall_name(id)))
+	debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (curr_timestamp, 'sys_exit', str(task_info[common_tid]['pid']), common_tid, common_cpu, id, syscall_name(id)))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
 
@@ -369,25 +369,25 @@ def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_
 
 	if pending:
 		task_state[common_tid]['pending'][id] = curr_timestamp - start_timestamp
-		debug_print("task %u syscall %s pending time %uns" % (common_tid, syscall_name(id), task_state[common_tid]['pending'][id]))
+		debug_print("\ttask %7s/%06u syscall %s pending time %uns" % (str(task_info[common_tid]['pid']), common_tid, syscall_name(id), task_state[common_tid]['pending'][id]))
 	else:
 		delta = curr_timestamp - task_state[common_tid]['sys_enter']
 		task_state[common_tid]['count'][id] += 1
 		task_state[common_tid]['elapsed'][id] += delta 
-		debug_print("delta = %u min = %u max = %u" % (delta, task_state[common_tid]['min'][id], task_state[common_tid]['max'][id]))
+		debug_print("\tdelta = %u min = %u max = %u" % (delta, task_state[common_tid]['min'][id], task_state[common_tid]['max'][id]))
 		if delta < task_state[common_tid]['min'][id]:
-			debug_print("task %u %s min %u" % (common_tid, syscall_name(id), delta))
+			debug_print("\t%s min %u" % (syscall_name(id), delta))
 			task_state[common_tid]['min'][id] = delta
 		if delta > task_state[common_tid]['max'][id]:
-			debug_print("task %u %s max %u" % (common_tid, syscall_name(id), delta))
+			debug_print("\t%s max %u" % (syscall_name(id), delta))
 			task_state[common_tid]['max'][id] = delta
-		debug_print("task %u syscall %s count %u time %uns elapsed %uns" % (common_tid, syscall_name(id), task_state[common_tid]['count'][id], delta, task_state[common_tid]['elapsed'][id]))
+		debug_print("\tsyscall %s count %u time %uns elapsed %uns" % (syscall_name(id), task_state[common_tid]['count'][id], delta, task_state[common_tid]['elapsed'][id]))
 
 	if task_state[common_tid]['cpu'] != common_cpu:
 		debug_print("migration within syscall!")
 		task_state[common_tid]['migrations'] += 1
 		delta /= 2
-		debug_print("task %u migrations %u sys %u + %u = %u" % (common_tid, task_state[common_tid]['migrations'], task_state[common_tid]['sys'][task_state[common_tid]['cpu']] - delta, delta, task_state[common_tid]['sys'][task_state[common_tid]['cpu']]))
+		debug_print("\tmigrations %u sys %u + %u = %u" % (task_state[common_tid]['migrations'], task_state[common_tid]['sys'][task_state[common_tid]['cpu']] - delta, delta, task_state[common_tid]['sys'][task_state[common_tid]['cpu']]))
 		task_state[common_tid]['sys'][task_state[common_tid]['cpu']] += delta
 		task_state[common_tid]['timestamp'] += delta
 
@@ -403,7 +403,7 @@ def powerpc__hcall_entry(event_name, context, common_cpu, common_secs, common_ns
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s %u [%03u] %s" % (common_secs, common_nsecs, 'hvc_entry', common_tid, common_cpu, hcall_name(opcode)))
+	debug_print("%016u %-9s %7s/%06u [%03u] %s" % (curr_timestamp, 'hvc_entry', str(task_info[common_tid]['pid']), common_tid, common_cpu, hcall_name(opcode)))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
 
@@ -426,7 +426,7 @@ def powerpc__hcall_exit(event_name, context, common_cpu, common_secs, common_nse
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s %u [%03u] %u:%s" % (common_secs, common_nsecs, 'hvc_exit', common_tid, common_cpu, opcode, hcall_name(opcode)))
+	debug_print("%016u %-9s %7s/%06u [%03u] %s" % (curr_timestamp, 'hvc_exit', str(task_info[common_tid]['pid']), common_tid, common_cpu, hcall_name(opcode)))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
 
@@ -444,25 +444,25 @@ def powerpc__hcall_exit(event_name, context, common_cpu, common_secs, common_nse
 
 	if pending:
 		task_state[common_tid]['pending_hv'][opcode] = curr_timestamp - start_timestamp
-		debug_print("task %u hcall %s pending time %fms" % (common_tid, hcall_name(opcode), task_state[common_tid]['pending_hv'][opcode]))
+		debug_print("\thcall %s pending time %fms" % (hcall_name(opcode), task_state[common_tid]['pending_hv'][opcode]))
 	else:
 		delta = curr_timestamp - task_state[common_tid]['hcall_enter']
 		task_state[common_tid]['count_hv'][opcode] += 1
 		task_state[common_tid]['elapsed_hv'][opcode] += delta 
-		debug_print("delta = %f min = %f max = %f" % (delta, task_state[common_tid]['min_hv'][opcode], task_state[common_tid]['max_hv'][opcode]))
+		debug_print("\tdelta = %f min = %f max = %f" % (delta, task_state[common_tid]['min_hv'][opcode], task_state[common_tid]['max_hv'][opcode]))
 		if delta < task_state[common_tid]['min_hv'][opcode]:
-			debug_print("task %u %s min %f" % (common_tid, hcall_name(opcode), delta))
+			debug_print("\t%s min %f" % (hcall_name(opcode), delta))
 			task_state[common_tid]['min_hv'][opcode] = delta
 		if delta > task_state[common_tid]['max_hv'][opcode]:
-			debug_print("task %u %s max %f" % (common_tid, hcall_name(opcode), delta))
+			debug_print("\t%s max %f" % (hcall_name(opcode), delta))
 			task_state[common_tid]['max_hv'][opcode] = delta
-		debug_print("task %u hcall %s count %u time %fms elapsed %fms" % (common_tid, hcall_name(opcode), task_state[common_tid]['count_hv'][opcode], delta, task_state[common_tid]['elapsed_hv'][opcode]))
+		debug_print("\thcall %s count %u time %fms elapsed %fms" % (hcall_name(opcode), task_state[common_tid]['count_hv'][opcode], delta, task_state[common_tid]['elapsed_hv'][opcode]))
 
 	if task_state[common_tid]['cpu'] != common_cpu:
 		debug_print("migration within hcall!")
 		task_state[common_tid]['migrations'] += 1
 		delta /= 2
-		debug_print("task %u migrations %u hv %f + %f = %f" % (common_tid, task_state[common_tid]['migrations'], task_state[common_tid]['hv'][task_state[common_tid]['cpu']] - delta, delta, task_state[common_tid]['hv'][task_state[common_tid]['cpu']]))
+		debug_print("\tmigrations %u hv %f + %f = %f" % (task_state[common_tid]['migrations'], task_state[common_tid]['hv'][task_state[common_tid]['cpu']] - delta, delta, task_state[common_tid]['hv'][task_state[common_tid]['cpu']]))
 		task_state[common_tid]['hv'][task_state[common_tid]['cpu']] += delta
 		task_state[common_tid]['timestamp'] += delta
 
@@ -481,14 +481,14 @@ def sched__sched_switch(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s %u:%s %u:%s" % (common_secs, common_nsecs, 'switch', prev_pid, task_state[prev_pid]['mode'], next_pid, task_state[next_pid]['mode']))
+	debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (curr_timestamp, 'switch', common_cpu, str(task_info[common_tid]['pid']), common_tid, task_state[common_tid]['mode']))
 
 	generic_event(event_name, common_cpu, start_timestamp, prev_pid, prev_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
 	if task_state[prev_pid]['sched_stat'] == False:
 		task_state[prev_pid]['sched_stat'] = True
 		task_state[prev_pid]['runtime'][common_cpu] = curr_timestamp - start_timestamp
-		debug_print("%7s.%9s runtime = %u" % ("", "", task_state[prev_pid]['runtime'][common_cpu]))
+		debug_print("\truntime = %u" % (task_state[common_tid]['runtime'][common_cpu]))
 
 	task_state[prev_pid]['resume-mode'] = task_state[prev_pid]['mode']
 	change_mode('idle', prev_pid, curr_timestamp)
@@ -498,7 +498,7 @@ def sched__sched_switch(event_name, context, common_cpu,
 	if task_state[next_pid]['sched_stat'] == False:
 		task_state[next_pid]['sched_stat'] = True
 		task_state[next_pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp
-		debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[next_pid]['unaccounted'][common_cpu]))
+		debug_print("\tunaccounted = %u" % (task_state[common_tid]['unaccounted'][common_cpu]))
 
 	task_state[next_pid]['cpu'] = common_cpu
 
@@ -517,7 +517,7 @@ def sched__sched_migrate_task(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s pid=%u, orig_cpu=%u, dest_cpu=%u" % (common_secs, common_nsecs, 'migrate', pid, orig_cpu, dest_cpu))
+	debug_print("%016u %-9s %7s/%06u [%03u] %03u" % (curr_timestamp, 'migrate', str(task_info[common_tid]['pid']), common_tid, orig_cpu, dest_cpu))
 
 	if orig_cpu == dest_cpu:
 		return
@@ -544,7 +544,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s filename=%s, pid=%d, old_pid=%d" % (common_secs, common_nsecs, 'exec', filename, pid, old_pid))
+	debug_print("%016u %-9s %7s/%06u [%03u] filename=%s" % (curr_timestamp, 'exec', str(task_info[common_tid]['pid']), common_tid, common_cpu, filename))
 
 	generic_event(event_name, common_cpu, start_timestamp, old_pid, common_comm, 'sys', get_unknown, perf_sample_dict)
 
@@ -561,7 +561,7 @@ def sched__sched_process_exec(event_name, context, common_cpu,
 			suffix += 1
 		else:
 			break
-	debug_print("\"new\" task \"%s\"" % (task))
+	debug_print("\t\"new\" task \"%s\"" % (task))
 
 	task_info[task]['pid'] = task_info[old_pid]['pid']
 	task_info[task]['comm'] = task_info[old_pid]['comm']
@@ -620,7 +620,7 @@ def sched__sched_process_fork(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s [%u:%u] [%u] (parent_pid=%u)" % (common_secs, common_nsecs, 'fork', common_pid, common_tid, child_pid, parent_pid))
+	debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (curr_timestamp, 'fork', common_cpu, str(task_info[common_tid]['pid']), common_tid, common_comm))
 
 	generic_event(event_name, common_cpu, start_timestamp, parent_pid, common_comm, 'sys', getpid, perf_sample_dict)
 
@@ -646,7 +646,7 @@ def sched__sched_process_exit(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%07u.%09u %-9s %u" % (common_secs, common_nsecs, 'exit', common_tid))
+	debug_print("%016u %-9s %7s/%06u" % (curr_timestamp, 'exit', str(task_info[common_tid]['pid']), common_tid))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'sys', getpid, perf_sample_dict)
 
@@ -665,7 +665,7 @@ def sched__sched_stat_runtime(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%7u.%09u sched_stat_runtime(%u,%s,%u,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),runtime,vruntime,task_state[pid]['mode']))
+	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'runtime', str(task_info[common_pid]['pid']), common_pid, common_comm, runtime, task_state[common_pid]['mode']))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
@@ -679,9 +679,9 @@ def sched__sched_stat_runtime(event_name, context, common_cpu,
 			runtime = curr_timestamp - start_timestamp
 		else:
 			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - runtime
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
+			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s runtime %u + %u = %u" % ("", "", task_state[pid]['runtime'][cpu], runtime, task_state[pid]['runtime'][cpu] + runtime))
+	debug_print("\truntime %u + %u = %u" % (task_state[pid]['runtime'][cpu], runtime, task_state[pid]['runtime'][cpu] + runtime))
 	task_state[pid]['runtime'][cpu] += runtime
 
 	if params.debug:
@@ -695,7 +695,7 @@ def sched__sched_stat_blocked(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%7u.%09u sched_stat_blocked(%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'blocked', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
@@ -709,9 +709,9 @@ def sched__sched_stat_blocked(event_name, context, common_cpu,
 			delay = curr_timestamp - start_timestamp
 		else:
 			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
+			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s blocked %u + %u = %u" % ("", "", task_state[pid]['blocked'][cpu], delay, task_state[pid]['blocked'][cpu] + delay))
+	debug_print("\tblocked %u + %u = %u" % (task_state[pid]['blocked'][cpu], delay, task_state[pid]['blocked'][cpu] + delay))
 	task_state[pid]['blocked'][cpu] += delay
 
 	if params.debug:
@@ -725,7 +725,7 @@ def sched__sched_stat_iowait(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%7u.%09u sched_stat_iowait (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'iowait', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
@@ -739,9 +739,9 @@ def sched__sched_stat_iowait(event_name, context, common_cpu,
 			delay = curr_timestamp - start_timestamp
 		else:
 			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
+			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s iowait %u + %u = %u" % ("", "", task_state[pid]['iowait'][cpu], delay, task_state[pid]['iowait'][cpu] + delay))
+	debug_print("\tiowait %u + %u = %u" % (task_state[pid]['iowait'][cpu], delay, task_state[pid]['iowait'][cpu] + delay))
 	task_state[pid]['iowait'][cpu] += delay
 
 	if params.debug:
@@ -755,7 +755,7 @@ def sched__sched_stat_wait(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%7u.%09u sched_stat_wait   (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'wait', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
@@ -769,9 +769,9 @@ def sched__sched_stat_wait(event_name, context, common_cpu,
 			delay = curr_timestamp - start_timestamp
 		else:
 			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
+			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s wait %u + %u = %u" % ("", "", task_state[pid]['wait'][cpu], delay, task_state[pid]['wait'][cpu] + delay))
+	debug_print("\twait %u + %u = %u" % (task_state[pid]['wait'][cpu], delay, task_state[pid]['wait'][cpu] + delay))
 	task_state[pid]['wait'][cpu] += delay
 
 	if params.debug:
@@ -785,7 +785,7 @@ def sched__sched_stat_sleep(event_name, context, common_cpu,
 	if (start_timestamp == 0):
 		start_timestamp = curr_timestamp
 
-	debug_print("%7u.%09u sched_stat_sleep  (%u,%s,%u) in %s" % (common_secs,common_nsecs,pid,null(comm),delay,task_state[pid]['mode']))
+	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'sleep', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
 
 	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
 
@@ -799,9 +799,9 @@ def sched__sched_stat_sleep(event_name, context, common_cpu,
 			delay = curr_timestamp - start_timestamp
 		else:
 			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("%7s.%9s unaccounted = %u" % ("", "", task_state[pid]['unaccounted'][cpu]))
+			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
 
-	debug_print("%7s.%9s sleep %u + %u = %u" % ("", "", task_state[pid]['sleep'][cpu], delay, task_state[pid]['sleep'][cpu] + delay))
+	debug_print("\tsleep %u + %u = %u" % (task_state[pid]['sleep'][cpu], delay, task_state[pid]['sleep'][cpu] + delay))
 	task_state[pid]['sleep'][cpu] += delay
 
 	if params.debug:
@@ -891,9 +891,9 @@ def print_syscall_totals(tidlist):
 						max = task_state[task]['max'][id]
 						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), count, ns2ms(elapsed), ns2ms(pending)),
 						if count > 0:
-							print " %12.6f %12.6f %12.6f" % (ns2ms(elapsed)/count, ns2ms(min), ns2ms(max))
+							print "%12.6f %12.6f %12.6f" % (ns2ms(elapsed)/count, ns2ms(min), ns2ms(max))
 						else:
-							print " %12s %12s %12s" % ("--", "--", "--")
+							print "%12s %12s %12s" % ("--", "--", "--")
 						if id not in task_state['ALL']['count'].keys():
 							new_task_syscall('ALL', id)
 						task_state['ALL']['count'][id] += count
@@ -914,9 +914,9 @@ def print_syscall_totals(tidlist):
 						max_hv = task_state[task]['max_hv'][opcode]
 						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (opcode, hcall_name(opcode), count_hv, ns2ms(elapsed_hv), ns2ms(pending_hv)),
 						if count_hv > 0:
-							print " %12.6f %12.6f %12.6f" % (ns2ms(elapsed_hv)/count_hv, ns2ms(min_hv), ns2ms(max_hv))
+							print "%12.6f %12.6f %12.6f" % (ns2ms(elapsed_hv)/count_hv, ns2ms(min_hv), ns2ms(max_hv))
 						else:
-							print " %12s %12s %12s" % ("--", "--", "--")
+							print "%12s %12s %12s" % ("--", "--", "--")
 						if opcode not in task_state['ALL']['count_hv'].keys():
 							new_task_hcall('ALL', opcode)
 						task_state['ALL']['count_hv'][opcode] += count_hv
@@ -958,7 +958,7 @@ def print_syscall_totals(tidlist):
 
 	print "%7s:" % ("ALL")
 	print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
-        # is it correct to add in hv here?
+	# is it correct to add in hv here?
 	print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % ("", ns2ms(all_user), ns2ms(all_sys), ns2ms(all_hv), ns2ms(all_busy), ns2ms(all_idle), ns2ms(all_runtime), ns2ms(all_sleep), ns2ms(all_wait), ns2ms(all_blocked), ns2ms(all_iowait), ns2ms(all_unaccounted), (float((all_user + all_sys + all_hv + all_busy) * 100) / float(all_user + all_sys + all_hv + all_busy + all_idle)) if all_user + all_sys + all_hv + all_busy > 0 else 0, all_migrations)
 	print
 	if task_state['ALL']['count']:
@@ -966,9 +966,9 @@ def print_syscall_totals(tidlist):
 		for id in sorted(task_state['ALL']['count'].keys(), key= lambda x: (task_state['ALL']['count'][x], task_state['ALL']['elapsed'][x]), reverse=True):
 			print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), task_state['ALL']['count'][id], ns2ms(task_state['ALL']['elapsed'][id]), ns2ms(task_state['ALL']['pending'][id])),
 			if task_state['ALL']['count'][id] > 0:
-				print " %12.6f %12.6f %12.6f" % (ns2ms(task_state['ALL']['elapsed'][id]/task_state['ALL']['count'][id]), ns2ms(task_state['ALL']['min'][id]), ns2ms(task_state['ALL']['max'][id]))
+				print "%12.6f %12.6f %12.6f" % (ns2ms(task_state['ALL']['elapsed'][id]/task_state['ALL']['count'][id]), ns2ms(task_state['ALL']['min'][id]), ns2ms(task_state['ALL']['max'][id]))
 			else:
-				print " %12s %12s %12s" % ("--", "--", "--")
+				print "%12s %12s %12s" % ("--", "--", "--")
 		print
 
 	if task_state['ALL']['count_hv']:
@@ -976,9 +976,9 @@ def print_syscall_totals(tidlist):
 		for opcode in sorted(task_state['ALL']['count_hv'].keys(), key= lambda x: (task_state['ALL']['count_hv'][x], task_state['ALL']['elapsed_hv'][x]), reverse=True):
 			print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (opcode, hcall_name(opcode), task_state['ALL']['count_hv'][opcode], ns2ms(task_state['ALL']['elapsed_hv'][opcode]), ns2ms(task_state['ALL']['pending_hv'][opcode])),
 			if task_state['ALL']['count_hv'][opcode] > 0:
-				print " %12.6f %12.6f %12.6f" % (ns2ms(task_state['ALL']['elapsed_hv'][opcode]/task_state['ALL']['count_hv'][opcode]), ns2ms(task_state['ALL']['min_hv'][opcode]), ns2ms(task_state['ALL']['max_hv'][opcode]))
+				print "%12.6f %12.6f %12.6f" % (ns2ms(task_state['ALL']['elapsed_hv'][opcode]/task_state['ALL']['count_hv'][opcode]), ns2ms(task_state['ALL']['min_hv'][opcode]), ns2ms(task_state['ALL']['max_hv'][opcode]))
 			else:
-				print " %12s %12s %12s" % ("--", "--", "--")
+				print "%12s %12s %12s" % ("--", "--", "--")
 		print
 
 	del task_state['ALL']
