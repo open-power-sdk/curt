@@ -26,6 +26,7 @@ from Util import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true', help='enable debugging output')
+parser.add_argument('--window', type=int, help='enable debugging output', default=20)
 params = parser.parse_args()
 
 global start_timestamp, curr_timestamp
@@ -174,6 +175,10 @@ def trace_begin():
 	pass
 
 def trace_end():
+	global events
+	for event in events:
+		event.process()
+
 	# wrap up pending here
 	for task in task_tids:
 		if task == 0:
@@ -294,518 +299,594 @@ def getpid(perf_sample_dict):
 def get_unknown(perf_sample_dict):
 	return 'unknown'
 
-def generic_event(event_name, cpu, timestamp, tid, comm, mode, getpid, perf_sample_dict):
-	debug_print("%016u %7s/%06u [%03u] %-32s" % (timestamp, str(task_info[tid]['pid']), tid, cpu, event_name))
+events = []
+n_events = 0
 
-	if tid not in task_tids:
-		new_task(tid, getpid(perf_sample_dict), comm, timestamp, mode)
-	elif task_info[tid]['pid'] == 'unknown':
-		task_info[tid]['pid'] = getpid(perf_sample_dict)
+def process_event(event):
+	global events,n_events,curr_timestamp
+	i = n_events
+	while i > 0 and events[i-1].timestamp > event.timestamp:
+		i = i-1
+	events.insert(i,event)
+	if n_events < params.window:
+		n_events = n_events+1
+	else:
+		event = events[0]
+		# need to delete from events list now,
+		# because event.process() could reenter here
+		del events[0]
+		if event.timestamp < curr_timestamp:
+			print "OUT OF ORDER"
+		event.process()
+		if params.debug:
+			print_syscall_totals([event.tid])
 
-	if cpu not in task_state[tid][mode].keys():
-		new_tid_cpu(tid, cpu)
-	elif cpu != task_state[tid]['cpu']:
-		task_state[tid]['migrations'] += 1
+class Event (object):
+
+	def __init__(self):
+		self.timestamp = 0
+		self.cpu = 0
+		self.tid = 0
+		self.command = 'unknown'
+		self.mode = 'unknown'
+
+	def process(self):
+		global start_timestamp
+
+		debug_print("%016u %7s/%06u [%03u] %-32s" % (self.timestamp, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.__class__.__name__))
+
+		if self.tid not in task_tids:
+			new_task(self.tid, self.pid, self.command, start_timestamp, self.mode)
+		elif task_info[self.tid]['pid'] == 'unknown':
+			task_info[self.tid]['pid'] = self.pid
+			debug_print("\t%7s/%06u" % (str(task_info[self.tid]['pid']), self.tid))
+
+		if self.cpu not in task_state[self.tid][self.mode].keys():
+			new_tid_cpu(self.tid, self.cpu)
+		elif self.cpu != task_state[self.tid]['cpu']:
+			task_state[self.tid]['migrations'] += 1
+
+class Event_sys_enter ( Event ):
+
+	def __init__(self, timestamp, cpu, tid, comm, id, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.id = id
+		self.pid = pid
+		self.mode = 'busy-unknown'
+		
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
+
+		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.id, syscall_name(self.id)))
+
+		super(Event_sys_enter, self).process()
+
+		if task_state[self.tid]['mode'] == 'sys':
+			print "re-entered! syscall from signal handler??"
+			sys.exit(0)
+
+		if task_state[self.tid]['mode'] == 'busy-unknown':
+			task_state[self.tid]['mode'] = 'user'
+			for cpu in task_state[self.tid]['busy-unknown'].keys():
+				task_state[self.tid]['user'][self.cpu] = task_state[self.tid]['busy-unknown'][self.cpu] 
+				task_state[self.tid]['busy-unknown'][self.cpu] = 0
+
+		task_state[self.tid]['cpu'] = self.cpu
+		task_state[self.tid]['id'] = self.id
+		task_state[self.tid]['sys_enter'] = curr_timestamp
+		if self.id not in task_state[self.tid]['count'].keys():
+			new_task_syscall(self.tid, self.id)
+		change_mode('sys',self.tid,curr_timestamp)
 
 def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (curr_timestamp, 'sys_enter', str(task_info[common_tid]['pid']), common_tid, common_cpu, id, syscall_name(id)))
+	event = Event_sys_enter(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, id, getpid(perf_sample_dict))
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
+class Event_sys_exit ( Event ):
 
-	if task_state[common_tid]['mode'] == 'sys':
-		print "re-entered! syscall from signal handler??"
-		sys.exit(0)
+	def __init__(self, timestamp, cpu, tid, comm, id, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.id = id
+		self.pid = pid
+		self.mode = 'busy-unknown'
+		
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	if task_state[common_tid]['mode'] == 'busy-unknown':
-		task_state[common_tid]['mode'] = 'user'
-		for cpu in task_state[common_tid]['busy-unknown'].keys():
-			task_state[common_tid]['user'][cpu] = task_state[common_tid]['busy-unknown'][cpu] 
-			task_state[common_tid]['busy-unknown'][cpu] = 0
+		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.id, syscall_name(self.id)))
 
-	task_state[common_tid]['cpu'] = common_cpu
-	task_state[common_tid]['id'] = id
-	task_state[common_tid]['sys_enter'] = curr_timestamp
-	if id not in task_state[common_tid]['count'].keys():
-		new_task_syscall(common_tid, id)
-	change_mode('sys',common_tid,curr_timestamp)
+		super(Event_sys_exit, self).process()
 
-	if params.debug:
-		print_syscall_totals([common_tid])
+		pending = False
+
+		if task_state[self.tid]['mode'] == 'busy-unknown':
+			task_state[self.tid]['mode'] = 'sys'
+			for cpu in task_state[self.tid]['busy-unknown'].keys():
+				task_state[self.tid]['sys'][cpu] = task_state[self.tid]['busy-unknown'][cpu] 
+				task_state[self.tid]['busy-unknown'][cpu] = 0
+			pending = True
+
+		if self.id not in task_state[self.tid]['count'].keys():
+			new_task_syscall(self.tid, self.id)
+
+		# commented out because sometimes syscalls, like futex, go idle (sched_switch),
+		# then the next event is sys_exit
+		#if task_state[self.tid]['mode'] != 'sys':
+		#	debug_print("spurious exit?! mode was %s" % (task_state[self.tid]['mode']))
+		#	sys.exit(0)
+
+		if pending:
+			delta = curr_timestamp - start_timestamp
+			task_state[self.tid]['pending'][self.id] = delta
+			debug_print("\ttask %7s/%06u syscall %s pending time %uns" % (str(task_info[self.tid]['pid']), self.tid, syscall_name(self.id), task_state[self.tid]['pending'][self.id]))
+		else:
+			delta = curr_timestamp - task_state[self.tid]['sys_enter']
+			task_state[self.tid]['count'][self.id] += 1
+			task_state[self.tid]['elapsed'][self.id] += delta 
+			debug_print("\tdelta = %u min = %u max = %u" % (delta, task_state[self.tid]['min'][self.id], task_state[self.tid]['max'][self.id]))
+			if delta < task_state[self.tid]['min'][self.id]:
+				debug_print("\t%s min %u" % (syscall_name(self.id), delta))
+				task_state[self.tid]['min'][self.id] = delta
+			if delta > task_state[self.tid]['max'][self.id]:
+				debug_print("\t%s max %u" % (syscall_name(self.id), delta))
+				task_state[self.tid]['max'][self.id] = delta
+			debug_print("\tsyscall %s count %u time %uns elapsed %uns" % (syscall_name(self.id), task_state[self.tid]['count'][self.id], delta, task_state[self.tid]['elapsed'][self.id]))
+
+		if task_state[self.tid]['cpu'] != self.cpu:
+			debug_print("migration within syscall!")
+			task_state[self.tid]['migrations'] += 1
+			delta /= 2
+			debug_print("\tmigrations %u sys %u + %u = %u" % (task_state[self.tid]['migrations'], task_state[self.tid]['sys'][task_state[self.tid]['cpu']] - delta, delta, task_state[self.tid]['sys'][task_state[self.tid]['cpu']]))
+			task_state[self.tid]['sys'][task_state[self.tid]['cpu']] += delta
+			task_state[self.tid]['timestamp'] += delta
+
+		change_mode('user',self.tid,curr_timestamp)
 
 def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (curr_timestamp, 'sys_exit', str(task_info[common_tid]['pid']), common_tid, common_cpu, id, syscall_name(id)))
+	event = Event_sys_exit(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, id, getpid(perf_sample_dict))
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
+class Event_hcall_entry ( Event ):
 
-	pending = False
+	def __init__(self, timestamp, cpu, tid, comm, opcode, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.opcode = opcode
+		self.pid = pid
+		self.mode = 'busy-unknown'
 
-	if task_state[common_tid]['mode'] == 'busy-unknown':
-		task_state[common_tid]['mode'] = 'sys'
-		for cpu in task_state[common_tid]['busy-unknown'].keys():
-			task_state[common_tid]['sys'][cpu] = task_state[common_tid]['busy-unknown'][cpu] 
-			task_state[common_tid]['busy-unknown'][cpu] = 0
-		pending = True
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	if id not in task_state[common_tid]['count'].keys():
-		new_task_syscall(common_tid, id)
+		debug_print("%016u %-9s %7s/%06u [%03u] %s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, hcall_name(self.opcode)))
 
-	# commented out because sometimes syscalls, like futex, go idle (sched_switch),
-	# then the next event is sys_exit
-	#if task_state[common_tid]['mode'] != 'sys':
-	#	debug_print("spurious exit?! mode was %s" % (task_state[common_tid]['mode']))
-	#	sys.exit(0)
+		super(Event_hcall_entry, self).process()
 
-	if pending:
-		task_state[common_tid]['pending'][id] = curr_timestamp - start_timestamp
-		debug_print("\ttask %7s/%06u syscall %s pending time %uns" % (str(task_info[common_tid]['pid']), common_tid, syscall_name(id), task_state[common_tid]['pending'][id]))
-	else:
-		delta = curr_timestamp - task_state[common_tid]['sys_enter']
-		task_state[common_tid]['count'][id] += 1
-		task_state[common_tid]['elapsed'][id] += delta 
-		debug_print("\tdelta = %u min = %u max = %u" % (delta, task_state[common_tid]['min'][id], task_state[common_tid]['max'][id]))
-		if delta < task_state[common_tid]['min'][id]:
-			debug_print("\t%s min %u" % (syscall_name(id), delta))
-			task_state[common_tid]['min'][id] = delta
-		if delta > task_state[common_tid]['max'][id]:
-			debug_print("\t%s max %u" % (syscall_name(id), delta))
-			task_state[common_tid]['max'][id] = delta
-		debug_print("\tsyscall %s count %u time %uns elapsed %uns" % (syscall_name(id), task_state[common_tid]['count'][id], delta, task_state[common_tid]['elapsed'][id]))
+		task_state[self.tid]['resume-mode'] = task_state[self.tid]['mode']
+		task_state[self.tid]['cpu'] = self.cpu
+		task_state[self.tid]['opcode'] = self.opcode
+		task_state[self.tid]['hcall_enter'] = curr_timestamp
+		if self.opcode not in task_state[self.tid]['count_hv'].keys():
+			new_task_hcall(self.tid, self.opcode)
 
-	if task_state[common_tid]['cpu'] != common_cpu:
-		debug_print("migration within syscall!")
-		task_state[common_tid]['migrations'] += 1
-		delta /= 2
-		debug_print("\tmigrations %u sys %u + %u = %u" % (task_state[common_tid]['migrations'], task_state[common_tid]['sys'][task_state[common_tid]['cpu']] - delta, delta, task_state[common_tid]['sys'][task_state[common_tid]['cpu']]))
-		task_state[common_tid]['sys'][task_state[common_tid]['cpu']] += delta
-		task_state[common_tid]['timestamp'] += delta
-
-	change_mode('user',common_tid,curr_timestamp)
-
-	if params.debug:
-		print_syscall_totals([common_tid])
+		change_mode('hv',self.tid,curr_timestamp)
 
 def powerpc__hcall_entry(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u [%03u] %s" % (curr_timestamp, 'hvc_entry', str(task_info[common_tid]['pid']), common_tid, common_cpu, hcall_name(opcode)))
+	event = Event_hcall_entry(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, opcode, getpid(perf_sample_dict))
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
+class Event_hcall_exit ( Event ):
 
-	task_state[common_tid]['resume-mode'] = task_state[common_tid]['mode']
-	task_state[common_tid]['cpu'] = common_cpu
-	task_state[common_tid]['opcode'] = opcode
-	task_state[common_tid]['hcall_enter'] = curr_timestamp
-	if opcode not in task_state[common_tid]['count_hv'].keys():
-		new_task_hcall(common_tid, opcode)
+	def __init__(self, timestamp, cpu, tid, comm, opcode, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.opcode = opcode
+		self.pid = pid
+		self.mode = 'busy-unknown'
 
-	change_mode('hv',common_tid,curr_timestamp)
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	if params.debug:
-		print_syscall_totals([common_tid])
+		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.opcode, hcall_name(self.opcode)))
+
+		super(Event_hcall_exit, self).process()
+
+		pending = False
+
+		if task_state[self.tid]['mode'] == 'busy-unknown':
+			task_state[self.tid]['mode'] = 'hv'
+			for cpu in task_state[self.tid]['busy-unknown'].keys():
+				task_state[self.tid]['hv'][cpu] = task_state[self.tid]['busy-unknown'][cpu]
+				task_state[self.tid]['busy-unknown'][cpu] = 0
+			pending = True
+
+		if opcode not in task_state[self.tid]['count_hv'].keys():
+			new_task_hcall(self.tid, opcode)
+
+		if pending:
+			task_state[self.tid]['pending_hv'][opcode] = curr_timestamp - start_timestamp
+			debug_print("\thcall %s pending time %fms" % (hcall_name(opcode), task_state[self.tid]['pending_hv'][opcode]))
+		else:
+			delta = curr_timestamp - task_state[self.tid]['hcall_enter']
+			task_state[self.tid]['count_hv'][opcode] += 1
+			task_state[self.tid]['elapsed_hv'][opcode] += delta 
+			debug_print("\tdelta = %f min = %f max = %f" % (delta, task_state[self.tid]['min_hv'][opcode], task_state[self.tid]['max_hv'][opcode]))
+			if delta < task_state[self.tid]['min_hv'][opcode]:
+				debug_print("\t%s min %f" % (hcall_name(opcode), delta))
+				task_state[self.tid]['min_hv'][opcode] = delta
+			if delta > task_state[self.tid]['max_hv'][opcode]:
+				debug_print("\t%s max %f" % (hcall_name(opcode), delta))
+				task_state[self.tid]['max_hv'][opcode] = delta
+			debug_print("\thcall %s count %u time %fms elapsed %fms" % (hcall_name(opcode), task_state[self.tid]['count_hv'][opcode], delta, task_state[self.tid]['elapsed_hv'][opcode]))
+
+			if task_state[self.tid]['cpu'] != self.cpu:
+				debug_print("migration within hcall!")
+				task_state[self.tid]['migrations'] += 1
+				delta /= 2
+				debug_print("\tmigrations %u hv %f + %f = %f" % (task_state[self.tid]['migrations'], task_state[self.tid]['hv'][task_state[self.tid]['cpu']] - delta, delta, task_state[self.tid]['hv'][task_state[self.tid]['cpu']]))
+				task_state[self.tid]['hv'][task_state[self.tid]['cpu']] += delta
+				task_state[self.tid]['timestamp'] += delta
+
+			change_mode(task_state[self.tid]['resume-mode'],self.tid,curr_timestamp)
 
 def powerpc__hcall_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u [%03u] %s" % (curr_timestamp, 'hvc_exit', str(task_info[common_tid]['pid']), common_tid, common_cpu, hcall_name(opcode)))
+	event = Event_hcall_exit(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, opcode, getpid(perf_sample_dict))
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'busy-unknown', getpid, perf_sample_dict)
+class Event_sched_switch_out (Event):
 
-	pending = False
+	def __init__(self, timestamp, cpu, tid, comm, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.pid = pid
+		self.mode = 'busy-unknown'
 
-	if task_state[common_tid]['mode'] == 'busy-unknown':
-		task_state[common_tid]['mode'] = 'hv'
-		for cpu in task_state[common_tid]['busy-unknown'].keys():
-			task_state[common_tid]['hv'][cpu] = task_state[common_tid]['busy-unknown'][cpu] 
-			task_state[common_tid]['busy-unknown'][cpu] = 0
-		pending = True
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	if opcode not in task_state[common_tid]['count_hv'].keys():
-		new_task_hcall(common_tid, opcode)
+		debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (self.timestamp, self.__class__.__name__, self.cpu, str(task_info[self.tid]['pid']), self.tid, task_state[self.tid]['mode']))
 
-	if pending:
-		task_state[common_tid]['pending_hv'][opcode] = curr_timestamp - start_timestamp
-		debug_print("\thcall %s pending time %fms" % (hcall_name(opcode), task_state[common_tid]['pending_hv'][opcode]))
-	else:
-		delta = curr_timestamp - task_state[common_tid]['hcall_enter']
-		task_state[common_tid]['count_hv'][opcode] += 1
-		task_state[common_tid]['elapsed_hv'][opcode] += delta 
-		debug_print("\tdelta = %f min = %f max = %f" % (delta, task_state[common_tid]['min_hv'][opcode], task_state[common_tid]['max_hv'][opcode]))
-		if delta < task_state[common_tid]['min_hv'][opcode]:
-			debug_print("\t%s min %f" % (hcall_name(opcode), delta))
-			task_state[common_tid]['min_hv'][opcode] = delta
-		if delta > task_state[common_tid]['max_hv'][opcode]:
-			debug_print("\t%s max %f" % (hcall_name(opcode), delta))
-			task_state[common_tid]['max_hv'][opcode] = delta
-		debug_print("\thcall %s count %u time %fms elapsed %fms" % (hcall_name(opcode), task_state[common_tid]['count_hv'][opcode], delta, task_state[common_tid]['elapsed_hv'][opcode]))
+		super(Event_sched_switch_out, self).process()
 
-	if task_state[common_tid]['cpu'] != common_cpu:
-		debug_print("migration within hcall!")
-		task_state[common_tid]['migrations'] += 1
-		delta /= 2
-		debug_print("\tmigrations %u hv %f + %f = %f" % (task_state[common_tid]['migrations'], task_state[common_tid]['hv'][task_state[common_tid]['cpu']] - delta, delta, task_state[common_tid]['hv'][task_state[common_tid]['cpu']]))
-		task_state[common_tid]['hv'][task_state[common_tid]['cpu']] += delta
-		task_state[common_tid]['timestamp'] += delta
+		if task_state[self.tid]['sched_stat'] == False:
+			task_state[self.tid]['sched_stat'] = True
+			task_state[self.tid]['runtime'][self.cpu] = curr_timestamp - start_timestamp
+			debug_print("\truntime = %u" % (task_state[self.tid]['runtime'][self.cpu]))
 
-	change_mode(task_state[common_tid]['resume-mode'],common_tid,curr_timestamp)
+		task_state[self.tid]['resume-mode'] = task_state[self.tid]['mode']
+		change_mode('idle', self.tid, curr_timestamp)
 
-	if params.debug:
-		print_syscall_totals([common_tid])
+class Event_sched_switch_in (Event):
+
+	def __init__(self, timestamp, cpu, tid, comm, pid ):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.pid = pid
+		self.mode = 'idle'
+
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
+
+		debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (self.timestamp, self.__class__.__name__, self.cpu, str(task_info[self.tid]['pid']), self.tid, task_state[self.tid]['mode']))
+
+		super(Event_sched_switch_in, self).process()
+
+		if task_state[self.tid]['sched_stat'] == False:
+			task_state[self.tid]['sched_stat'] = True
+			task_state[self.tid]['unaccounted'][self.cpu] = curr_timestamp - start_timestamp
+			debug_print("\tunaccounted = %u" % (task_state[self.tid]['unaccounted'][self.cpu]))
+
+		task_state[self.tid]['cpu'] = self.cpu
+
+		change_mode(task_state[self.tid]['resume-mode'], self.tid, curr_timestamp)
 
 def sched__sched_switch(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, prev_comm, prev_pid, prev_prio, prev_state, 
 	next_comm, next_pid, next_prio, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (curr_timestamp, 'switch', common_cpu, str(task_info[common_tid]['pid']), common_tid, task_state[common_tid]['mode']))
+	timestamp = nsecs(common_secs, common_nsecs)
+	event = Event_sched_switch_out(timestamp, common_cpu, prev_pid, prev_comm, 'unknown')
+	process_event(event)
+	event = Event_sched_switch_in(timestamp, common_cpu, next_pid, next_comm, 'unknown')
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, prev_pid, prev_comm, 'busy-unknown', get_unknown, perf_sample_dict)
+class Event_sched_migrate_task (Event):
 
-	if task_state[prev_pid]['sched_stat'] == False:
-		task_state[prev_pid]['sched_stat'] = True
-		task_state[prev_pid]['runtime'][common_cpu] = curr_timestamp - start_timestamp
-		debug_print("\truntime = %u" % (task_state[common_tid]['runtime'][common_cpu]))
+	def __init__(self, timestamp, cpu, tid, comm, dest_cpu, pid ):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.dest_cpu = dest_cpu
+		self.pid = pid
+		self.mode = 'idle'
 
-	task_state[prev_pid]['resume-mode'] = task_state[prev_pid]['mode']
-	change_mode('idle', prev_pid, curr_timestamp)
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	generic_event(event_name, common_cpu, start_timestamp, next_pid, next_comm, 'idle', get_unknown, perf_sample_dict)
+		if self.cpu == self.dest_cpu:
+			return
 
-	if task_state[next_pid]['sched_stat'] == False:
-		task_state[next_pid]['sched_stat'] = True
-		task_state[next_pid]['unaccounted'][common_cpu] = curr_timestamp - start_timestamp
-		debug_print("\tunaccounted = %u" % (task_state[common_tid]['unaccounted'][common_cpu]))
+		debug_print("%016u %-9s %7s/%06u [%03u] %03u" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.dest_cpu))
 
-	task_state[next_pid]['cpu'] = common_cpu
+		super(Event_sched_migrate_task, self).process()
 
-	change_mode(task_state[next_pid]['resume-mode'], next_pid, curr_timestamp)
+		task_state[self.tid]['migrations'] += 1
 
-	if params.debug:
-		print_syscall_totals([prev_pid, next_pid])
+		change_mode(task_state[self.tid]['mode'], self.tid, curr_timestamp)
+		if self.dest_cpu not in task_state[self.tid]['sys'].keys():
+			new_tid_cpu(self.tid, self.dest_cpu)
+		task_state[self.tid]['cpu'] = self.dest_cpu
 
 def sched__sched_migrate_task(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, orig_cpu, 
 	dest_cpu, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u [%03u] %03u" % (curr_timestamp, 'migrate', str(task_info[common_tid]['pid']), common_tid, orig_cpu, dest_cpu))
+	event = Event_sched_migrate_task(nsecs(common_secs,common_nsecs), orig_cpu, pid, comm, dest_cpu, 'unknown')
+	process_event(event)
 
-	if orig_cpu == dest_cpu:
-		return
+class Event_sched_process_exec (Event):
 
-	generic_event(event_name, orig_cpu, start_timestamp, pid, comm, 'idle', get_unknown, perf_sample_dict)
+	def __init__(self, timestamp, cpu, tid, comm, filename, pid ):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.filename = filename
+		self.pid = pid
+		self.mode = 'sys'
 
-	task_state[pid]['migrations'] += 1
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	change_mode(task_state[pid]['mode'], pid, curr_timestamp)
-	if dest_cpu not in task_state[pid]['sys'].keys():
-		new_tid_cpu(pid, dest_cpu)
-	task_state[pid]['cpu'] = dest_cpu
+		debug_print("%016u %-9s %7s/%06u [%03u] filename=%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.filename))
 
-	if params.debug:
-		print_syscall_totals([pid])
+		super(Event_sched_process_exec, self).process()
+
+		# close out current task stats and stow them somewhere,
+		# because we're reusing the TID for a new process image,
+		# for which we need to start new task stats
+
+		change_mode('exit', self.tid, curr_timestamp)
+
+		suffix=0
+		while True:
+			task = str(self.tid)+"-"+str(suffix)
+			if task in task_tids:
+				suffix += 1
+			else:
+				break
+		debug_print("\t\"new\" task \"%s\"" % (task))
+
+		task_info[task]['pid'] = task_info[self.tid]['pid']
+		task_info[task]['comm'] = task_info[self.tid]['comm']
+		task_tids.append(task)
+		task_state[task]['mode'] = 'exit'
+		task_state[task]['migrations'] = task_state[self.tid]['migrations']
+		for cpu in sorted(task_state[self.tid]['sys'].keys()):
+			task_state[task]['user'][cpu] = task_state[self.tid]['user'][cpu]
+			task_state[task]['sys'][cpu] = task_state[self.tid]['sys'][cpu]
+			task_state[task]['hv'][cpu] = task_state[self.tid]['hv'][cpu]
+			task_state[task]['idle'][cpu] = task_state[self.tid]['idle'][cpu]
+			task_state[task]['busy-unknown'][cpu] = task_state[self.tid]['busy-unknown'][cpu]
+			task_state[task]['runtime'][cpu] = task_state[self.tid]['runtime'][cpu]
+			task_state[task]['sleep'][cpu] = task_state[self.tid]['sleep'][cpu]
+			task_state[task]['wait'][cpu] = task_state[self.tid]['wait'][cpu]
+			task_state[task]['blocked'][cpu] = task_state[self.tid]['blocked'][cpu]
+			task_state[task]['iowait'][cpu] = task_state[self.tid]['iowait'][cpu]
+			task_state[task]['unaccounted'][cpu] = task_state[self.tid]['unaccounted'][cpu]
+		for id in task_state[self.tid]['count'].keys():
+			task_state[task]['count'][id] = task_state[self.tid]['count'][id]
+			task_state[task]['elapsed'][id] = task_state[self.tid]['elapsed'][id]
+			task_state[task]['pending'][id] = task_state[self.tid]['pending'][id]
+			task_state[task]['min'][id] = task_state[self.tid]['min'][id]
+			task_state[task]['max'][id] = task_state[self.tid]['max'][id]
+		for opcode in task_state[self.tid]['count_hv'].keys():
+			task_state[task]['count_hv'][opcode] = task_state[self.tid]['count_hv'][opcode]
+			task_state[task]['elapsed_hv'][opcode] = task_state[self.tid]['elapsed_hv'][opcode]
+			task_state[task]['pending_hv'][opcode] = task_state[self.tid]['pending_hv'][opcode]
+			task_state[task]['min_hv'][opcode] = task_state[self.tid]['min_hv'][opcode]
+			task_state[task]['max_hv'][opcode] = task_state[self.tid]['max_hv'][opcode]
+
+		del task_info[self.tid]
+		task_tids.remove(self.tid)
+		del task_state[self.tid]
+
+		new_task(self.tid, self.pid, self.command, self.timestamp, 'idle')
+		task_state[self.tid]['sched_stat'] = True
+		EXEC = 11
+		event = Event_sys_enter(self.timestamp, self.cpu, self.tid, self.command, EXEC, self.pid)
+		process_event(event)
 
 def sched__sched_process_exec(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, filename, pid, old_pid, perf_sample_dict):
-	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u [%03u] filename=%s" % (curr_timestamp, 'exec', str(task_info[common_tid]['pid']), common_tid, common_cpu, filename))
+	event = Event_sched_process_exec(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, filename, getpid(perf_sample_dict))
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, old_pid, common_comm, 'sys', get_unknown, perf_sample_dict)
+class Event_sched_process_fork (Event):
 
-	# close out current task stats and stow them somewhere,
-	# because we're reusing the TID for a new process image,
-	# for which we need to start new task stats
+	def __init__(self, timestamp, cpu, tid, comm, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.pid = pid
+		self.mode = 'idle'
 
-	change_mode('exit', old_pid, curr_timestamp)
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	suffix=0
-	while True:
-		task = str(old_pid)+"-"+str(suffix)
-		if task in task_tids:
-			suffix += 1
-		else:
-			break
-	debug_print("\t\"new\" task \"%s\"" % (task))
+		debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (self.timestamp, self.__class__.__name__, self.cpu, str(task_info[self.tid]['pid']), self.tid, self.command))
 
-	task_info[task]['pid'] = task_info[old_pid]['pid']
-	task_info[task]['comm'] = task_info[old_pid]['comm']
-	task_tids.append(task)
-	task_state[task]['mode'] = 'exit'
-	task_state[task]['migrations'] = task_state[old_pid]['migrations']
-	for cpu in sorted(task_state[old_pid]['sys'].keys()):
-		task_state[task]['user'][cpu] = task_state[old_pid]['user'][cpu]
-		task_state[task]['sys'][cpu] = task_state[old_pid]['sys'][cpu]
-		task_state[task]['hv'][cpu] = task_state[old_pid]['hv'][cpu]
-		task_state[task]['idle'][cpu] = task_state[old_pid]['idle'][cpu]
-		task_state[task]['busy-unknown'][cpu] = task_state[old_pid]['busy-unknown'][cpu]
-		task_state[task]['runtime'][cpu] = task_state[old_pid]['runtime'][cpu]
-		task_state[task]['sleep'][cpu] = task_state[old_pid]['sleep'][cpu]
-		task_state[task]['wait'][cpu] = task_state[old_pid]['wait'][cpu]
-		task_state[task]['blocked'][cpu] = task_state[old_pid]['blocked'][cpu]
-		task_state[task]['iowait'][cpu] = task_state[old_pid]['iowait'][cpu]
-		task_state[task]['unaccounted'][cpu] = task_state[old_pid]['unaccounted'][cpu]
-	for id in task_state[old_pid]['count'].keys():
-		task_state[task]['count'][id] = task_state[old_pid]['count'][id]
-		task_state[task]['elapsed'][id] = task_state[old_pid]['elapsed'][id]
-		task_state[task]['pending'][id] = task_state[old_pid]['pending'][id]
-		task_state[task]['min'][id] = task_state[old_pid]['min'][id]
-		task_state[task]['max'][id] = task_state[old_pid]['max'][id]
-	for opcode in task_state[old_pid]['count_hv'].keys():
-		task_state[task]['count_hv'][opcode] = task_state[old_pid]['count_hv'][opcode]
-		task_state[task]['elapsed_hv'][opcode] = task_state[old_pid]['elapsed_hv'][opcode]
-		task_state[task]['pending_hv'][opcode] = task_state[old_pid]['pending_hv'][opcode]
-		task_state[task]['min_hv'][opcode] = task_state[old_pid]['min_hv'][opcode]
-		task_state[task]['max_hv'][opcode] = task_state[old_pid]['max_hv'][opcode]		
+		super(Event_sched_process_fork, self).process()
+		task_state[self.tid]['timestamp'] = self.timestamp
 
-	if params.debug:
-		print_syscall_totals([old_pid])
-		print_syscall_totals([task])
-
-	del task_info[old_pid]
-	task_tids.remove(old_pid)
-	del task_state[old_pid]
-	new_task(common_pid, pid, common_comm, curr_timestamp, 'idle')
-	task_state[pid]['sched_stat'] = True
-	perf_sample_dict['sample']['tid'] = pid
-	EXEC = 11
-	# args is not used by the caller, or we're in trouble
-	raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, pid, common_comm, common_callchain, EXEC, 'args', perf_sample_dict)
-
-	if params.debug:
-		print_syscall_totals([old_pid,task])
+		task_state[self.tid]['sched_stat'] = True
+		CLONE = 120
+		id = CLONE
+		task_state[self.tid]['resume-mode'] = 'sys'
+		task_state[self.tid]['id'] = id
+		task_state[self.tid]['sys_enter'] = self.timestamp
+		new_task_syscall(self.tid, id)
 
 def sched__sched_process_fork(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, parent_comm, parent_pid, child_comm, child_pid, perf_sample_dict):
-	common_tid = common_pid
-	common_pid = perf_sample_dict['sample']['pid']
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (curr_timestamp, 'fork', common_cpu, str(task_info[common_tid]['pid']), common_tid, common_comm))
+	event = Event_sched_process_fork(nsecs(common_secs,common_nsecs), common_cpu, child_pid, child_comm, 'unknown')
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, parent_pid, common_comm, 'sys', getpid, perf_sample_dict)
+class Event_sched_process_exit (Event):
 
-	generic_event(event_name, common_cpu, curr_timestamp, child_pid, common_comm, 'idle', getpid, perf_sample_dict)
+	def __init__(self, timestamp, cpu, tid, comm, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.pid = pid
+		self.mode = 'sys'
 
-	task_state[child_pid]['sched_stat'] = True
-	CLONE = 120
-	id = CLONE
-	task_state[child_pid]['resume-mode'] = 'sys'
-	task_state[child_pid]['id'] = id
-	task_state[child_pid]['sys_enter'] = curr_timestamp
-	new_task_syscall(child_pid, id)
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
 
-	if params.debug:
-		print_syscall_totals([common_tid, child_pid])
+		debug_print("%016u %-9s %7s/%06u" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid))
 
+		super(Event_sched_process_exit, self).process()
+
+		change_mode('exit', self.tid, self.timestamp)
+		task_state[self.tid]['exit'][self.cpu] = 0
+		
 def sched__sched_process_exit(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, perf_sample_dict):
-	common_tid = common_pid
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u %-9s %7s/%06u" % (curr_timestamp, 'exit', str(task_info[common_tid]['pid']), common_tid))
+	event = Event_sched_process_exit(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, getpid(perf_sample_dict))
+	process_event(event)
 
-	generic_event(event_name, common_cpu, start_timestamp, common_tid, common_comm, 'sys', getpid, perf_sample_dict)
+class Event_sched_stat (Event):
 
-	change_mode('exit', common_tid, curr_timestamp)
-	task_state[common_tid]['exit'][common_cpu] = 0
+	def __init__(self, timestamp, cpu, tid, comm, delta, bucket):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.delta = delta
+		self.bucket = bucket
+		self.mode = 'busy-unknown'
+		self.pid = 'unknown'
 
-	if params.debug:
-		print_syscall_totals([common_tid])
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
+
+		debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (self.timestamp, self.bucket, str(task_info[self.tid]['pid']), self.tid, self.command, self.delta, task_state[self.tid]['mode']))
+
+		# sched_stat events can occur on any cpu
+		# so make sure this doesn't look like a migration
+		self.cpu = task_state[self.tid]['cpu']
+
+		super(Event_sched_stat, self).process()
+
+		if task_state[self.tid]['sched_stat'] == False:
+			task_state[self.tid]['sched_stat'] = True
+			if self.delta > self.timestamp - start_timestamp:
+				self.delta = self.timestamp - start_timestamp
+			else:
+				task_state[self.tid]['unaccounted'][self.cpu] = self.timestamp - start_timestamp - self.delta
+				debug_print("\tunaccounted = %u" % (task_state[self.tid]['unaccounted'][self.cpu]))
+
+		debug_print("\t%s %u + %u = %u" % (self.bucket, task_state[self.tid][self.bucket][self.cpu], self.delta, task_state[self.tid][self.bucket][self.cpu] + self.delta))
+		task_state[self.tid][self.bucket][self.cpu] += self.delta
 
 def sched__sched_stat_runtime(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, runtime, vruntime, 
 		perf_sample_dict):
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'runtime', str(task_info[common_pid]['pid']), common_pid, common_comm, runtime, task_state[common_pid]['mode']))
-
-	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
-
-	# sched_stat events can occur on any cpu
-	# so make sure this doesn't look like a migration
-	cpu = task_state[pid]['cpu']
-
-	if task_state[pid]['sched_stat'] == False:
-		task_state[pid]['sched_stat'] = True
-		if runtime > curr_timestamp - start_timestamp:
-			runtime = curr_timestamp - start_timestamp
-		else:
-			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - runtime
-			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
-
-	debug_print("\truntime %u + %u = %u" % (task_state[pid]['runtime'][cpu], runtime, task_state[pid]['runtime'][cpu] + runtime))
-	task_state[pid]['runtime'][cpu] += runtime
-
-	if params.debug:
-		print_syscall_totals([pid])
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, runtime, 'runtime')
+	process_event(event)
 
 def sched__sched_stat_blocked(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'blocked', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
-
-	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
-
-	# sched_stat events can occur on any cpu
-	# so make sure this doesn't look like a migration
-	cpu = task_state[pid]['cpu']
-
-	if task_state[pid]['sched_stat'] == False:
-		task_state[pid]['sched_stat'] = True
-		if delay > curr_timestamp - start_timestamp:
-			delay = curr_timestamp - start_timestamp
-		else:
-			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
-
-	debug_print("\tblocked %u + %u = %u" % (task_state[pid]['blocked'][cpu], delay, task_state[pid]['blocked'][cpu] + delay))
-	task_state[pid]['blocked'][cpu] += delay
-
-	if params.debug:
-		print_syscall_totals([pid])
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'blocked')
+	process_event(event)
 
 def sched__sched_stat_iowait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'iowait', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
-
-	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
-
-	# sched_stat events can occur on any cpu
-	# so make sure this doesn't look like a migration
-	cpu = task_state[pid]['cpu']
-
-	if task_state[pid]['sched_stat'] == False:
-		task_state[pid]['sched_stat'] = True
-		if delay > curr_timestamp - start_timestamp:
-			delay = curr_timestamp - start_timestamp
-		else:
-			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
-
-	debug_print("\tiowait %u + %u = %u" % (task_state[pid]['iowait'][cpu], delay, task_state[pid]['iowait'][cpu] + delay))
-	task_state[pid]['iowait'][cpu] += delay
-
-	if params.debug:
-		print_syscall_totals([pid])
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'iowait')
+	process_event(event)
 
 def sched__sched_stat_wait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'wait', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
-
-	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
-
-	# sched_stat events can occur on any cpu
-	# so make sure this doesn't look like a migration
-	cpu = task_state[pid]['cpu']
-
-	if task_state[pid]['sched_stat'] == False:
-		task_state[pid]['sched_stat'] = True
-		if delay > curr_timestamp - start_timestamp:
-			delay = curr_timestamp - start_timestamp
-		else:
-			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
-
-	debug_print("\twait %u + %u = %u" % (task_state[pid]['wait'][cpu], delay, task_state[pid]['wait'][cpu] + delay))
-	task_state[pid]['wait'][cpu] += delay
-
-	if params.debug:
-		print_syscall_totals([pid])
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'wait')
+	process_event(event)
 
 def sched__sched_stat_sleep(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
-	global start_timestamp, curr_timestamp
-	curr_timestamp = nsecs(common_secs,common_nsecs)
-	if (start_timestamp == 0):
-		start_timestamp = curr_timestamp
 
-	debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (curr_timestamp, 'sleep', str(task_info[common_pid]['pid']), common_pid, common_comm, delay, task_state[common_pid]['mode']))
-
-	generic_event(event_name, common_cpu, start_timestamp, common_pid, common_comm, 'busy-unknown', get_unknown, perf_sample_dict)
-
-	# sched_stat events can occur on any cpu
-	# so make sure this doesn't look like a migration
-	cpu = task_state[pid]['cpu']
-
-	if task_state[pid]['sched_stat'] == False:
-		task_state[pid]['sched_stat'] = True
-		if delay > curr_timestamp - start_timestamp:
-			delay = curr_timestamp - start_timestamp
-		else:
-			task_state[pid]['unaccounted'][cpu] = curr_timestamp - start_timestamp - delay
-			debug_print("\tunaccounted = %u" % (task_state[pid]['unaccounted'][cpu]))
-
-	debug_print("\tsleep %u + %u = %u" % (task_state[pid]['sleep'][cpu], delay, task_state[pid]['sleep'][cpu] + delay))
-	task_state[pid]['sleep'][cpu] += delay
-
-	if params.debug:
-		print_syscall_totals([pid])
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'sleep')
+	process_event(event)
 
 #def trace_unhandled(event_name, context, event_fields_dict):
 #	pass
