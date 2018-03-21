@@ -512,7 +512,7 @@ class Event_hcall_exit ( Event ):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.opcode, hcall_name(self.opcode)))
+		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.opcode, hcall_name(self.opcode)))
 
 		super(Event_hcall_exit, self).process()
 
@@ -525,24 +525,24 @@ class Event_hcall_exit ( Event ):
 				task_state[self.tid]['busy-unknown'][cpu] = 0
 			pending = True
 
-		if opcode not in task_state[self.tid]['count_hv'].keys():
-			new_task_hcall(self.tid, opcode)
+		if self.opcode not in task_state[self.tid]['count_hv'].keys():
+			new_task_hcall(self.tid, self.opcode)
 
 		if pending:
-			task_state[self.tid]['pending_hv'][opcode] = curr_timestamp - start_timestamp
-			debug_print("\thcall %s pending time %fms" % (hcall_name(opcode), task_state[self.tid]['pending_hv'][opcode]))
+			task_state[self.tid]['pending_hv'][self.opcode] = curr_timestamp - start_timestamp
+			debug_print("\thcall %s pending time %fms" % (hcall_name(self.opcode), task_state[self.tid]['pending_hv'][self.opcode]))
 		else:
 			delta = curr_timestamp - task_state[self.tid]['hcall_enter']
-			task_state[self.tid]['count_hv'][opcode] += 1
-			task_state[self.tid]['elapsed_hv'][opcode] += delta 
-			debug_print("\tdelta = %f min = %f max = %f" % (delta, task_state[self.tid]['min_hv'][opcode], task_state[self.tid]['max_hv'][opcode]))
-			if delta < task_state[self.tid]['min_hv'][opcode]:
-				debug_print("\t%s min %f" % (hcall_name(opcode), delta))
-				task_state[self.tid]['min_hv'][opcode] = delta
-			if delta > task_state[self.tid]['max_hv'][opcode]:
-				debug_print("\t%s max %f" % (hcall_name(opcode), delta))
-				task_state[self.tid]['max_hv'][opcode] = delta
-			debug_print("\thcall %s count %u time %fms elapsed %fms" % (hcall_name(opcode), task_state[self.tid]['count_hv'][opcode], delta, task_state[self.tid]['elapsed_hv'][opcode]))
+			task_state[self.tid]['count_hv'][self.opcode] += 1
+			task_state[self.tid]['elapsed_hv'][self.opcode] += delta 
+			debug_print("\tdelta = %f min = %f max = %f" % (delta, task_state[self.tid]['min_hv'][self.opcode], task_state[self.tid]['max_hv'][self.opcode]))
+			if delta < task_state[self.tid]['min_hv'][self.opcode]:
+				debug_print("\t%s min %f" % (hcall_name(self.opcode), delta))
+				task_state[self.tid]['min_hv'][self.opcode] = delta
+			if delta > task_state[self.tid]['max_hv'][self.opcode]:
+				debug_print("\t%s max %f" % (hcall_name(self.opcode), delta))
+				task_state[self.tid]['max_hv'][self.opcode] = delta
+			debug_print("\thcall %s count %u time %fms elapsed %fms" % (hcall_name(self.opcode), task_state[self.tid]['count_hv'][self.opcode], delta, task_state[self.tid]['elapsed_hv'][self.opcode]))
 
 			if task_state[self.tid]['cpu'] != self.cpu:
 				debug_print("migration within hcall!")
