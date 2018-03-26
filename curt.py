@@ -31,9 +31,125 @@ params = parser.parse_args()
 
 global start_timestamp, curr_timestamp
 
-task_state = autodict()
-task_info = autodict()
-task_tids = []
+class CPU:
+	def __init__(self):
+		self.sys = 0
+		self.user = 0
+		self.idle = 0
+		self.hv = 0
+		self.busy_unknown = 0
+		self.runtime = 0
+		self.sleep = 0
+		self.wait = 0
+		self.blocked = 0
+		self.iowait = 0
+		self.unaccounted = 0
+
+	def accumulate(self, cpu):
+		self.user += cpu.user
+		self.sys += cpu.sys
+		self.hv += cpu.hv
+		self.idle += cpu.idle
+		self.busy_unknown += cpu.busy_unknown
+		self.runtime += cpu.runtime
+		self.sleep += cpu.sleep
+		self.wait += cpu.wait
+		self.blocked += cpu.blocked
+		self.iowait += cpu.iowait
+		self.unaccounted += cpu.unaccounted
+
+	def output_header(self):
+		print "%12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%%" % \
+			("user", "sys", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util"),
+
+	def output(self):
+		print "%12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % \
+			(ns2ms(self.user), ns2ms(self.sys), ns2ms(self.hv), ns2ms(self.busy_unknown), ns2ms(self.idle), \
+			ns2ms(self.runtime), ns2ms(self.sleep), ns2ms(self.wait), ns2ms(self.blocked), ns2ms(self.blocked), ns2ms(self.unaccounted)),
+		running = self.user + self.sys + self.hv + self.busy_unknown
+		print "| %5.1f%%" % ((float(running * 100) / float(running + self.idle)) if running > 0 else 0),
+
+class Call:
+	def __init__(self):
+		self.timestamp = 0
+		self.count = 0
+		self.elapsed = 0
+		self.min = sys.maxint
+		self.max = 0
+		self.pending = 0
+		self.call = 'unknown'
+		self.calls = {}
+
+	def accumulate(self, call):
+		self.count += call.count
+		self.elapsed += call.elapsed
+		self.pending += call.pending
+		if call.min < self.min:
+			self.min = call.min
+		if call.max > self.max:
+			self.max = call.max
+
+	def output_header(self):
+		print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("ID", "name", "count", "elapsed", "pending", "average", "minimum", "maximum"),
+
+	def output(self, id, name):
+		print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, name, self.count, ns2ms(self.elapsed), ns2ms(self.pending)),
+		if self.count > 0:
+			print "%12.6f %12.6f %12.6f" % (ns2ms(float(self.elapsed)/float(self.count)), ns2ms(self.min), ns2ms(self.max))
+		else:
+			print "%12s %12s %12s" % ("--", "--", "--")
+
+class Task:
+	def __init__(self, timestamp, comm, mode, pid):
+		self.timestamp = timestamp
+		self.command = comm
+		self.mode = mode
+		self.resume_mode = 'busy-unknown'
+		self.migrations = 0
+		self.sched_stat = False
+		self.pid = pid
+		self.cpu = 'unknown'
+		self.cpus = {}
+		self.syscall = 'unknown'
+		self.syscall_timestamp = 0
+		self.syscalls = {}
+		self.hcall = 'unknown'
+		self.hcall_timestamp = 0
+		self.hcalls = {}
+
+	def change_mode(self, timestamp, mode):
+		delta = timestamp - self.timestamp
+		# TODO: there's probably a better way to do this
+		if self.mode == 'user':
+			self.cpus[self.cpu].user += delta
+			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].user - delta, delta, self.cpus[self.cpu].user))
+		elif self.mode == 'sys':
+			self.cpus[self.cpu].sys += delta
+			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].sys - delta, delta, self.cpus[self.cpu].sys))
+		elif self.mode == 'idle':
+			self.cpus[self.cpu].idle += delta
+			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].idle - delta, delta, self.cpus[self.cpu].idle))
+		elif self.mode == 'hv':
+			self.cpus[self.cpu].hv += delta
+			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].hv - delta, delta, self.cpus[self.cpu].hv))
+		elif self.mode == 'busy-unknown':
+			self.cpus[self.cpu].busy_unknown += delta
+			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].busy_unknown - delta, delta, self.cpus[self.cpu].busy_unknown))
+		debug_print("\tnow %s" % (mode))
+		self.mode = mode
+		self.timestamp = timestamp
+
+	def output_header(self):
+		print "     -- [%8s] %-20s %3s" % ("task", "command", "cpu"),
+		for cpu in self.cpus:
+			self.cpus[cpu].output_header()
+			break # I just need one to emit the header
+		print "%6s" % ("moves"),
+
+	def output_migrations(self):
+		print "%6u" % (self.migrations),
+
+tasks = {}
 
 def debug_print(s):
 	if params.debug:
@@ -170,9 +286,27 @@ def hcall_name(opcode):
 		return hcall_to_name[hex(opcode)]
 	except:
 		return str(opcode)
-		
+
+CLONE = 0
+EXEC = 0
+
 def trace_begin():
-	pass
+	global CLONE, EXEC
+	# find the (architecture-specific) syscall numbers
+	# to be used later in synthetic trace events
+	id = 0
+	while (CLONE == 0 or EXEC == 0) and id < 512:
+		if syscall_name(id) == "clone":
+			CLONE = id
+		elif syscall_name(id) == "execve":
+			EXEC = id
+		id += 1
+	if CLONE == 0:
+		print "syscall number for CLONE not found"
+		sys.exit(1)
+	if EXEC == 0:
+		print "syscall number for EXEC not found"
+		sys.exit(1)
 
 def trace_end():
 	global events
@@ -180,60 +314,62 @@ def trace_end():
 		event.process()
 
 	# wrap up pending here
-	for task in task_tids:
-		if task == 0:
+	for tid in tasks.keys():
+		if tid == 0:
 			continue
 
-		if task_state[task]['mode'] == 'sys':
-			delta = curr_timestamp - task_state[task]['sys_enter']
-			id = task_state[task]['id']
-			cpu = task_state[task]['cpu']
-			task_state[task]['pending'][id] += delta
-			task_state[task]['sys'][cpu] += delta
-			task_state[task]['runtime'][cpu] += delta
-			debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task_info[task]['pid']), task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
-			debug_print("task %7s/%06u (%s) sys time %f + %f = %fms" % (str(task_info[task]['pid']), task, syscall_name(id), task_state[task]['sys'][cpu] - delta, delta, task_state[task]['sys'][cpu]))
-		
-		elif task_state[task]['mode'] == 'hv':
-			delta = curr_timestamp - task_state[task]['hcall_enter']
-			opcode = task_state[task]['opcode']
-			cpu = task_state[task]['cpu']
-			task_state[task]['pending_hv'][opcode] += delta
-			task_state[task]['hv'][cpu] += delta
-			task_state[task]['runtime'][cpu] += delta
-			debug_print("task %7s/%06u hcall %s pending time %f + %f = %fms" % (str(task_info[task]['pid']), task, hcall_name(opcode), task_state[task]['pending_hv'][opcode] - delta, delta, task_state[task]['pending_hv'][opcode]))
-			debug_print("task %7s/%06u (%s) hcall time %f + %f = %fms" % (str(task_info[task]['pid']), task, hcall_name(opcode), task_state[task]['hv'][cpu] - delta, delta, task_state[task]['hv'][cpu]))
+		task = tasks[tid]
 
-		elif task_state[task]['mode'] == 'user':
-			delta = curr_timestamp - task_state[task]['timestamp']
-			cpu = task_state[task]['cpu']
-			task_state[task]['user'][cpu] += delta
-			task_state[task]['runtime'][cpu] += delta
-			debug_print("task %7s/%06u user time %f + %f = %fms" % (str(task_info[task]['pid']), task, task_state[task]['user'][cpu] - delta, delta, task_state[task]['user'][cpu]))
+		if task.mode == 'sys':
+			syscall = task.syscalls[task.syscall]
+			delta = curr_timestamp - syscall.timestamp
+			cpu = task.cpus[task.cpu]
+			syscall.pending += delta
+			cpu.sys += delta
+			cpu.runtime += delta
+			debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task.pid), tid, syscall_name(task.syscall), syscall.pending - delta, delta, syscall.pending))
+			debug_print("task %7s/%06u (%s) sys time %f + %f = %fms" % (str(task.pid), tid, syscall_name(task.syscall), task.cpus[task.cpu].sys - delta, delta, task.cpus[task.cpu].sys))
 
-		elif task_state[task]['mode'] == 'idle':
-			delta = curr_timestamp - task_state[task]['timestamp']
-			cpu = task_state[task]['cpu']
-			task_state[task]['idle'][cpu] += delta
-			task_state[task]['unaccounted'][cpu] += delta
-			debug_print("task %7s/%06u idle time %f + %f = %fms" % (str(task_info[task]['pid']), task, task_state[task]['idle'][cpu] - delta, delta, task_state[task]['idle'][cpu]))
+		elif task.mode == 'hv':
+			delta = curr_timestamp - task.hcalls[task.hcall].timestamp
+			opcode = task.hcall
+			cpu = task.cpu
+			task.hcalls[opcode].pending += delta
+			task.cpus[cpu].hv += delta
+			task.cpus[cpu].runtime += delta
+			debug_print("task %7s/%06u hcall %s pending time %f + %f = %fms" % (str(task.pid), tid, hcall_name(opcode), task.hcalls[opcode].pending - delta, delta, task.hcalls[opcode].pending))
+			debug_print("task %7s/%06u (%s) hcall time %f + %f = %fms" % (str(task.pid), tid, hcall_name(opcode), task.cpus[cpu].hv - delta, delta, task.cpus[cpu].hv))
+
+		elif task.mode == 'user':
+			delta = curr_timestamp - task.timestamp
+			cpu = task.cpu
+			task.cpus[cpu].user += delta
+			task.cpus[cpu].runtime += delta
+			debug_print("task %7s/%06u user time %f + %f = %fms" % (str(task.pid), tid, task.cpus[cpu].user - delta, delta, task.cpus[cpu].user))
+
+		elif task.mode == 'idle':
+			delta = curr_timestamp - task.timestamp
+			cpu = task.cpu
+			task.cpus[cpu].idle += delta
+			task.cpus[cpu].unaccounted += delta
+			debug_print("task %7s/%06u idle time %f + %f = %fms" % (str(task.pid), tid, task.cpus[cpu].idle - delta, delta, task.cpus[cpu].idle))
 			# what if 'resume-mode' isn't set?
 			# ...which is pretty likely if we're here and still 'busy-unknown'
-			if task_state[task]['resume-mode'] == 'sys':
-				delta = curr_timestamp - task_state[task]['sys_enter']
-				id = task_state[task]['id']
-				cpu = task_state[task]['cpu']
-				task_state[task]['pending'][id] += delta
-				debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task_info[task]['pid']), task, syscall_name(id), task_state[task]['pending'][id] - delta, delta, task_state[task]['pending'][id]))
+			if task.resume_mode == 'sys':
+				id = task.syscall
+				cpu = task.cpu
+				delta = curr_timestamp - task.syscalls[id].timestamp
+				task.syscalls[id].pending += delta
+				debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task.pid), tid, syscall_name(id), task.syscalls[id].pending - delta, delta, task.syscalls[id].pending))
 
-		elif task_state[task]['mode'] == 'busy-unknown':
-			delta = curr_timestamp - task_state[task]['timestamp']
-			cpu = task_state[task]['cpu']
-			task_state[task]['busy-unknown'][cpu] += delta
-			task_state[task]['unaccounted'][cpu] += delta
-			debug_print("task %7s/%06u busy-unknown %f + %f = %fms" % (str(task_info[task]['pid']), task, task_state[task]['busy-unknown'][cpu] - delta, delta, task_state[task]['busy-unknown'][cpu]))
+		elif task.mode == 'busy-unknown':
+			delta = curr_timestamp - task.timestamp
+			cpu = task.cpu
+			task.cpus[cpu].busy_unknown += delta
+			task.cpus[cpu].unaccounted += delta
+			debug_print("task %7s/%06u busy-unknown %f + %f = %fms" % (str(task.pid), tid, task.cpus[cpu].busy_unknown - delta, delta, task.cpus[cpu].busy_unknown))
 
-	print_syscall_totals(task_tids)
+	print_task_stats(tasks)
 
 start_timestamp = 0
 curr_timestamp = 0
@@ -241,63 +377,8 @@ curr_timestamp = 0
 def ns2ms(nsecs):
 	return nsecs * 0.000001
 
-def new_task(tid, pid, comm, timestamp, mode):
-	if tid != 0:
-		debug_print("\tnew task %7s/%06u (%s)" % (str(pid), tid, null(comm)))
-	task_info[tid]['pid'] = pid
-	task_info[tid]['comm'] = comm
-	task_state[tid]['timestamp'] = timestamp
-	task_state[tid]['mode'] = mode
-	task_state[tid]['resume-mode'] = 'busy-unknown'
-	task_state[tid]['migrations'] = 0
-	task_state[tid]['sched_stat'] = False
-	task_tids.append(tid);
-
-def new_tid_cpu(tid, cpu):
-	if tid != 0:
-		debug_print("\tnew CPU %d for task %7s/%06u" % (cpu, str(task_info[tid]['pid']), tid))
-	task_state[tid]['cpu'] = cpu
-	task_state[tid]['sys'][cpu] = 0
-	task_state[tid]['user'][cpu] = 0
-	task_state[tid]['idle'][cpu] = 0
-	task_state[tid]['hv'][cpu] = 0
-	task_state[tid]['busy-unknown'][cpu] = 0
-	task_state[tid]['runtime'][cpu] = 0 
-	task_state[tid]['sleep'][cpu] = 0 
-	task_state[tid]['wait'][cpu] = 0 
-	task_state[tid]['blocked'][cpu] = 0 
-	task_state[tid]['iowait'][cpu] = 0 
-	task_state[tid]['unaccounted'][cpu] = 0 
-
-def new_task_syscall(tid, id):
-	task_state[tid]['count'][id] = 0
-	task_state[tid]['elapsed'][id] = 0
-	task_state[tid]['min'][id] = sys.maxint
-	task_state[tid]['max'][id] = 0
-	task_state[tid]['pending'][id] = 0
-
-def new_task_hcall(tid, opcode):
-	task_state[tid]['count_hv'][opcode] = 0
-	task_state[tid]['elapsed_hv'][opcode] = 0
-	task_state[tid]['min_hv'][opcode] = sys.maxint
-	task_state[tid]['max_hv'][opcode] = 0
-	task_state[tid]['pending_hv'][opcode] = 0
-
-def change_mode(mode, tid, timestamp):
-	cpu = task_state[tid]['cpu']
-	delta = timestamp - task_state[tid]['timestamp']
-	task_state[tid][task_state[tid]['mode']][cpu] += delta
-	if tid != 0:
-		debug_print("\ttask %7s/%06u %s(%u) = %u + %u = %u" % (str(task_info[tid]['pid']), tid, task_state[tid]['mode'], cpu, task_state[tid][task_state[tid]['mode']][cpu] - delta, delta, task_state[tid][task_state[tid]['mode']][cpu]))
-		debug_print("\ttask %7s/%06u now %s" % (str(task_info[tid]['pid']), tid, mode))
-	task_state[tid]['mode'] = mode
-	task_state[tid]['timestamp'] = timestamp
-
 def getpid(perf_sample_dict):
 	return perf_sample_dict['sample']['pid']
-
-def get_unknown(perf_sample_dict):
-	return 'unknown'
 
 events = []
 n_events = 0
@@ -319,7 +400,7 @@ def process_event(event):
 			print "OUT OF ORDER"
 		event.process()
 		if params.debug:
-			print_syscall_totals([event.tid])
+			print_task_stats({event.tid: tasks[event.tid]})
 
 class Event (object):
 
@@ -333,18 +414,27 @@ class Event (object):
 	def process(self):
 		global start_timestamp
 
-		debug_print("%016u %7s/%06u [%03u] %-32s" % (self.timestamp, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.__class__.__name__))
+		try:
+			task = tasks[self.tid]
+			setpidmsg = ""
+			if task.pid == 'unknown':
+				tasks[self.tid].pid = self.pid
+				setpidmsg = "\n\tset PID"
+			debug_print("%016u %7s/%06u [%03u] %-32s%s" % (self.timestamp, str(tasks[self.tid].pid), self.tid, self.cpu, self.__class__.__name__, setpidmsg))
+		except:
+			debug_print("%016u %7s/%06u [%03u] %-32s\n\tnew Task" % (self.timestamp, str(self.pid), self.tid, self.cpu, self.__class__.__name__))
+			task = Task(start_timestamp, self.command, self.mode, self.pid)
+			tasks[self.tid] = task
 
-		if self.tid not in task_tids:
-			new_task(self.tid, self.pid, self.command, start_timestamp, self.mode)
-		elif task_info[self.tid]['pid'] == 'unknown':
-			task_info[self.tid]['pid'] = self.pid
-			debug_print("\t%7s/%06u" % (str(task_info[self.tid]['pid']), self.tid))
+		if self.cpu not in task.cpus:
+			debug_print("\tnew CPU")
+			task.cpus[self.cpu] = CPU()
+			task.cpu = self.cpu
+		elif self.cpu != task.cpu:
+			task.cpu = self.cpu
+			task.migrations += 1
 
-		if self.cpu not in task_state[self.tid][self.mode].keys():
-			new_tid_cpu(self.tid, self.cpu)
-		elif self.cpu != task_state[self.tid]['cpu']:
-			task_state[self.tid]['migrations'] += 1
+		return task
 
 class Event_sys_enter ( Event ):
 
@@ -363,26 +453,24 @@ class Event_sys_enter ( Event ):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.id, syscall_name(self.id)))
+		task = super(Event_sys_enter, self).process()
 
-		super(Event_sys_enter, self).process()
-
-		if task_state[self.tid]['mode'] == 'sys':
+		if task.mode == 'sys':
 			print "re-entered! syscall from signal handler??"
 			sys.exit(0)
 
-		if task_state[self.tid]['mode'] == 'busy-unknown':
-			task_state[self.tid]['mode'] = 'user'
-			for cpu in task_state[self.tid]['busy-unknown'].keys():
-				task_state[self.tid]['user'][self.cpu] = task_state[self.tid]['busy-unknown'][self.cpu] 
-				task_state[self.tid]['busy-unknown'][self.cpu] = 0
+		if task.mode == 'busy-unknown':
+			task.mode = 'user'
+			for cpu in task.cpus:
+				task.cpus[cpu].user = task.cpus[cpu].busy_unknown
+				task.cpus[cpu].busy_unknown = 0
 
-		task_state[self.tid]['cpu'] = self.cpu
-		task_state[self.tid]['id'] = self.id
-		task_state[self.tid]['sys_enter'] = curr_timestamp
-		if self.id not in task_state[self.tid]['count'].keys():
-			new_task_syscall(self.tid, self.id)
-		change_mode('sys',self.tid,curr_timestamp)
+		task.syscall = self.id
+		if self.id not in task.syscalls:
+			task.syscalls[self.id] = Call()
+
+		task.syscalls[self.id].timestamp = curr_timestamp
+		task.change_mode(curr_timestamp, 'sys')
 
 def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, perf_sample_dict):
 
@@ -406,54 +494,52 @@ class Event_sys_exit ( Event ):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.id, syscall_name(self.id)))
-
-		super(Event_sys_exit, self).process()
+		task = super(Event_sys_exit, self).process()
 
 		pending = False
 
-		if task_state[self.tid]['mode'] == 'busy-unknown':
-			task_state[self.tid]['mode'] = 'sys'
-			for cpu in task_state[self.tid]['busy-unknown'].keys():
-				task_state[self.tid]['sys'][cpu] = task_state[self.tid]['busy-unknown'][cpu] 
-				task_state[self.tid]['busy-unknown'][cpu] = 0
+		if task.mode == 'busy-unknown':
+			task.mode = 'sys'
+			for cpu in task.cpus:
+				task.cpus[cpu].sys = task.cpus[cpu].busy_unknown
+				task.cpus[cpu].busy_unknown = 0
 			pending = True
 
-		if self.id not in task_state[self.tid]['count'].keys():
-			new_task_syscall(self.tid, self.id)
+		if self.id not in task.syscalls:
+			task.syscalls[self.id] = Call()
+			task.syscalls[self.id].timestamp = start_timestamp
 
-		# commented out because sometimes syscalls, like futex, go idle (sched_switch),
-		# then the next event is sys_exit
-		#if task_state[self.tid]['mode'] != 'sys':
-		#	debug_print("spurious exit?! mode was %s" % (task_state[self.tid]['mode']))
-		#	sys.exit(0)
+		if task.mode != 'sys' and task.mode != 'idle':
+			print("%016u %7s/%06u [%03u] %-32s %-20s spurious exit; mode was %s" % (self.timestamp, str(self.pid), self.tid, self.cpu, self.__class__.__name__, syscall_name(self.id), task.mode))
+			# spurious exit: minimize impact to the data
+			task.syscalls[self.id].timestamp = curr_timestamp
 
 		if pending:
 			delta = curr_timestamp - start_timestamp
-			task_state[self.tid]['pending'][self.id] = delta
-			debug_print("\ttask %7s/%06u syscall %s pending time %uns" % (str(task_info[self.tid]['pid']), self.tid, syscall_name(self.id), task_state[self.tid]['pending'][self.id]))
+			task.syscalls[self.id].pending = delta
+			debug_print("\tsyscall %s pending time %uns" % (syscall_name(self.id), task.syscalls[self.id].pending))
 		else:
-			delta = curr_timestamp - task_state[self.tid]['sys_enter']
-			task_state[self.tid]['count'][self.id] += 1
-			task_state[self.tid]['elapsed'][self.id] += delta 
-			debug_print("\tdelta = %u min = %u max = %u" % (delta, task_state[self.tid]['min'][self.id], task_state[self.tid]['max'][self.id]))
-			if delta < task_state[self.tid]['min'][self.id]:
+			delta = curr_timestamp - task.syscalls[self.id].timestamp
+			task.syscalls[self.id].count += 1
+			task.syscalls[self.id].elapsed += delta 
+			debug_print("\tdelta = %u min = %u max = %u" % (delta, task.syscalls[self.id].min, task.syscalls[self.id].max))
+			if delta < task.syscalls[self.id].min:
 				debug_print("\t%s min %u" % (syscall_name(self.id), delta))
-				task_state[self.tid]['min'][self.id] = delta
-			if delta > task_state[self.tid]['max'][self.id]:
+				task.syscalls[self.id].min = delta
+			if delta > task.syscalls[self.id].max:
 				debug_print("\t%s max %u" % (syscall_name(self.id), delta))
-				task_state[self.tid]['max'][self.id] = delta
-			debug_print("\tsyscall %s count %u time %uns elapsed %uns" % (syscall_name(self.id), task_state[self.tid]['count'][self.id], delta, task_state[self.tid]['elapsed'][self.id]))
+				task.syscalls[self.id].max = delta
+			debug_print("\tsyscall %s count %u time %uns elapsed %uns" % (syscall_name(self.id), task.syscalls[self.id].count, delta, task.syscalls[self.id].elapsed))
 
-		if task_state[self.tid]['cpu'] != self.cpu:
+		if task.cpu != self.cpu:
 			debug_print("migration within syscall!")
-			task_state[self.tid]['migrations'] += 1
+			task.migrations += 1
 			delta /= 2
-			debug_print("\tmigrations %u sys %u + %u = %u" % (task_state[self.tid]['migrations'], task_state[self.tid]['sys'][task_state[self.tid]['cpu']] - delta, delta, task_state[self.tid]['sys'][task_state[self.tid]['cpu']]))
-			task_state[self.tid]['sys'][task_state[self.tid]['cpu']] += delta
-			task_state[self.tid]['timestamp'] += delta
+			debug_print("\tmigrations %u sys %u + %u = %u" % (task.syscalls[self.id].migrations, task.cpus[task.cpu].sys - delta, delta, task.cpus[task.cpu].sys))
+			task.cpus[task.cpu].sys += delta
+			task.syscalls[self.id].timestamp += delta
 
-		change_mode('user',self.tid,curr_timestamp)
+		task.change_mode(curr_timestamp, 'user')
 
 def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
 
@@ -477,18 +563,15 @@ class Event_hcall_entry ( Event ):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u [%03u] %s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, hcall_name(self.opcode)))
+		task = super(Event_hcall_entry, self).process()
 
-		super(Event_hcall_entry, self).process()
+		task.resume_mode = self.mode
+		task.hcall = self.opcode
+		if self.opcode not in task.hcalls:
+			task.hcalls[self.opcode] = Call()
 
-		task_state[self.tid]['resume-mode'] = task_state[self.tid]['mode']
-		task_state[self.tid]['cpu'] = self.cpu
-		task_state[self.tid]['opcode'] = self.opcode
-		task_state[self.tid]['hcall_enter'] = curr_timestamp
-		if self.opcode not in task_state[self.tid]['count_hv'].keys():
-			new_task_hcall(self.tid, self.opcode)
-
-		change_mode('hv',self.tid,curr_timestamp)
+		task.hcalls[self.opcode].timestamp = curr_timestamp
+		task.change_mode(curr_timestamp, 'hv')
 
 def powerpc__hcall_entry(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, perf_sample_dict):
 
@@ -512,47 +595,47 @@ class Event_hcall_exit ( Event ):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u [%03u] %u:%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.opcode, hcall_name(self.opcode)))
-
-		super(Event_hcall_exit, self).process()
+		task = super(Event_hcall_exit, self).process()
 
 		pending = False
 
-		if task_state[self.tid]['mode'] == 'busy-unknown':
-			task_state[self.tid]['mode'] = 'hv'
-			for cpu in task_state[self.tid]['busy-unknown'].keys():
-				task_state[self.tid]['hv'][cpu] = task_state[self.tid]['busy-unknown'][cpu]
-				task_state[self.tid]['busy-unknown'][cpu] = 0
+		if task.mode == 'busy-unknown':
+			task.mode = 'hv'
+			for cpu in task.cpus:
+				task.cpus[cpu].hv = task.cpus[cpu].busy_unknown
+				task.cpus[cpu].busy_unknown = 0
 			pending = True
 
-		if self.opcode not in task_state[self.tid]['count_hv'].keys():
-			new_task_hcall(self.tid, self.opcode)
+		if self.opcode not in task.hcalls:
+			task.hcalls[self.opcode] = Call()
+			task.hcalls[self.opcode].timestamp = start_timestamp
 
 		if pending:
-			task_state[self.tid]['pending_hv'][self.opcode] = curr_timestamp - start_timestamp
-			debug_print("\thcall %s pending time %fms" % (hcall_name(self.opcode), task_state[self.tid]['pending_hv'][self.opcode]))
+			delta = curr_timestamp - start_timestamp
+			task.hcalls[self.opcode].pending = delta
+			debug_print("\thcall %s pending time %uns" % (hcall_name(self.opcode), task.hcalls[self.opcode].pending))
 		else:
-			delta = curr_timestamp - task_state[self.tid]['hcall_enter']
-			task_state[self.tid]['count_hv'][self.opcode] += 1
-			task_state[self.tid]['elapsed_hv'][self.opcode] += delta 
-			debug_print("\tdelta = %f min = %f max = %f" % (delta, task_state[self.tid]['min_hv'][self.opcode], task_state[self.tid]['max_hv'][self.opcode]))
-			if delta < task_state[self.tid]['min_hv'][self.opcode]:
-				debug_print("\t%s min %f" % (hcall_name(self.opcode), delta))
-				task_state[self.tid]['min_hv'][self.opcode] = delta
-			if delta > task_state[self.tid]['max_hv'][self.opcode]:
-				debug_print("\t%s max %f" % (hcall_name(self.opcode), delta))
-				task_state[self.tid]['max_hv'][self.opcode] = delta
-			debug_print("\thcall %s count %u time %fms elapsed %fms" % (hcall_name(self.opcode), task_state[self.tid]['count_hv'][self.opcode], delta, task_state[self.tid]['elapsed_hv'][self.opcode]))
+			delta = curr_timestamp - task.hcalls[self.opcode].timestamp
+			task.hcalls[self.opcode].count += 1
+			task.hcalls[self.opcode].elapsed += delta 
+			debug_print("\tdelta = %u min = %u max = %u" % (delta, task.hcalls[self.opcode].min, task.hcalls[self.opcode].max))
+			if delta < task.hcalls[self.opcode].min:
+				debug_print("\t%s min %u" % (hcall_name(self.opcode), delta))
+				task.hcalls[self.opcode].min = delta
+			if delta > task.hcalls[self.opcode].max:
+				debug_print("\t%s max %u" % (hcall_name(self.opcode), delta))
+				task.hcalls[self.opcode].max = delta
+			debug_print("\thcall %s count %u time %uns elapsed %uns" % (hcall_name(self.opcode), task.hcalls[self.opcode].count, delta, task.hcalls[self.opcode].elapsed))
 
-			if task_state[self.tid]['cpu'] != self.cpu:
-				debug_print("migration within hcall!")
-				task_state[self.tid]['migrations'] += 1
-				delta /= 2
-				debug_print("\tmigrations %u hv %f + %f = %f" % (task_state[self.tid]['migrations'], task_state[self.tid]['hv'][task_state[self.tid]['cpu']] - delta, delta, task_state[self.tid]['hv'][task_state[self.tid]['cpu']]))
-				task_state[self.tid]['hv'][task_state[self.tid]['cpu']] += delta
-				task_state[self.tid]['timestamp'] += delta
+		if task.cpu != self.cpu:
+			debug_print("migration within hcall!")
+			task.migrations += 1
+			delta /= 2
+			debug_print("\tmigrations %u hv %u + %u = %u" % (task.hcalls[self.opcode].migrations, task.cpus[task.cpu].hv - delta, delta, task.cpus[task.cpu].hv))
+			task.cpus[task.cpu].hv += delta
+			task.hcalls[self.opcode].timestamp += delta
 
-			change_mode(task_state[self.tid]['resume-mode'],self.tid,curr_timestamp)
+		task.change_mode(curr_timestamp, task.resume_mode)
 
 def powerpc__hcall_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval, perf_sample_dict):
 
@@ -575,17 +658,15 @@ class Event_sched_switch_out (Event):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (self.timestamp, self.__class__.__name__, self.cpu, str(task_info[self.tid]['pid']), self.tid, task_state[self.tid]['mode']))
+		task = super(Event_sched_switch_out, self).process()
 
-		super(Event_sched_switch_out, self).process()
+		if task.sched_stat == False:
+			task.sched_stat = True
+			task.cpus[self.cpu].runtime = curr_timestamp - start_timestamp
+			debug_print("\truntime = %u" % (task.cpus[self.cpu].runtime))
 
-		if task_state[self.tid]['sched_stat'] == False:
-			task_state[self.tid]['sched_stat'] = True
-			task_state[self.tid]['runtime'][self.cpu] = curr_timestamp - start_timestamp
-			debug_print("\truntime = %u" % (task_state[self.tid]['runtime'][self.cpu]))
-
-		task_state[self.tid]['resume-mode'] = task_state[self.tid]['mode']
-		change_mode('idle', self.tid, curr_timestamp)
+		task.resume_mode = task.mode
+		task.change_mode(curr_timestamp, 'idle')
 
 class Event_sched_switch_in (Event):
 
@@ -603,18 +684,16 @@ class Event_sched_switch_in (Event):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (self.timestamp, self.__class__.__name__, self.cpu, str(task_info[self.tid]['pid']), self.tid, task_state[self.tid]['mode']))
+		task = super(Event_sched_switch_in, self).process()
 
-		super(Event_sched_switch_in, self).process()
+		if task.sched_stat == False:
+			task.sched_stat = True
+			task.cpus[self.cpu].unaccounted = curr_timestamp - start_timestamp
+			debug_print("\tunaccounted = %u" % (task.cpus[self.cpu].unaccounted))
 
-		if task_state[self.tid]['sched_stat'] == False:
-			task_state[self.tid]['sched_stat'] = True
-			task_state[self.tid]['unaccounted'][self.cpu] = curr_timestamp - start_timestamp
-			debug_print("\tunaccounted = %u" % (task_state[self.tid]['unaccounted'][self.cpu]))
+		task.cpu = self.cpu
 
-		task_state[self.tid]['cpu'] = self.cpu
-
-		change_mode(task_state[self.tid]['resume-mode'], self.tid, curr_timestamp)
+		task.change_mode(curr_timestamp, task.resume_mode)
 
 def sched__sched_switch(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
@@ -647,16 +726,14 @@ class Event_sched_migrate_task (Event):
 		if self.cpu == self.dest_cpu:
 			return
 
-		debug_print("%016u %-9s %7s/%06u [%03u] %03u" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.dest_cpu))
+		task = super(Event_sched_migrate_task, self).process()
 
-		super(Event_sched_migrate_task, self).process()
+		task.migrations += 1
 
-		task_state[self.tid]['migrations'] += 1
-
-		change_mode(task_state[self.tid]['mode'], self.tid, curr_timestamp)
-		if self.dest_cpu not in task_state[self.tid]['sys'].keys():
-			new_tid_cpu(self.tid, self.dest_cpu)
-		task_state[self.tid]['cpu'] = self.dest_cpu
+		task.change_mode(curr_timestamp, task.mode)
+		if self.dest_cpu not in task.cpus:
+			task.cpus[self.dest_cpu] = CPU()
+		task.cpu = self.dest_cpu
 
 def sched__sched_migrate_task(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
@@ -678,67 +755,38 @@ class Event_sched_process_exec (Event):
 		self.mode = 'sys'
 
 	def process(self):
+		global EXEC
 		global start_timestamp, curr_timestamp
 		curr_timestamp = self.timestamp
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u [%03u] filename=%s" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid, self.cpu, self.filename))
-
-		super(Event_sched_process_exec, self).process()
+		task = super(Event_sched_process_exec, self).process()
 
 		# close out current task stats and stow them somewhere,
 		# because we're reusing the TID for a new process image,
 		# for which we need to start new task stats
 
-		change_mode('exit', self.tid, curr_timestamp)
+		task.change_mode(curr_timestamp, 'exit')
 
 		suffix=0
 		while True:
-			task = str(self.tid)+"-"+str(suffix)
-			if task in task_tids:
+			new_tid = str(self.tid)+"-"+str(suffix)
+			if new_tid in tasks:
 				suffix += 1
 			else:
 				break
-		debug_print("\t\"new\" task \"%s\"" % (task))
+		debug_print("\t\"new\" task \"%s\"" % (new_tid))
 
-		task_info[task]['pid'] = task_info[self.tid]['pid']
-		task_info[task]['comm'] = task_info[self.tid]['comm']
-		task_tids.append(task)
-		task_state[task]['mode'] = 'exit'
-		task_state[task]['migrations'] = task_state[self.tid]['migrations']
-		for cpu in sorted(task_state[self.tid]['sys'].keys()):
-			task_state[task]['user'][cpu] = task_state[self.tid]['user'][cpu]
-			task_state[task]['sys'][cpu] = task_state[self.tid]['sys'][cpu]
-			task_state[task]['hv'][cpu] = task_state[self.tid]['hv'][cpu]
-			task_state[task]['idle'][cpu] = task_state[self.tid]['idle'][cpu]
-			task_state[task]['busy-unknown'][cpu] = task_state[self.tid]['busy-unknown'][cpu]
-			task_state[task]['runtime'][cpu] = task_state[self.tid]['runtime'][cpu]
-			task_state[task]['sleep'][cpu] = task_state[self.tid]['sleep'][cpu]
-			task_state[task]['wait'][cpu] = task_state[self.tid]['wait'][cpu]
-			task_state[task]['blocked'][cpu] = task_state[self.tid]['blocked'][cpu]
-			task_state[task]['iowait'][cpu] = task_state[self.tid]['iowait'][cpu]
-			task_state[task]['unaccounted'][cpu] = task_state[self.tid]['unaccounted'][cpu]
-		for id in task_state[self.tid]['count'].keys():
-			task_state[task]['count'][id] = task_state[self.tid]['count'][id]
-			task_state[task]['elapsed'][id] = task_state[self.tid]['elapsed'][id]
-			task_state[task]['pending'][id] = task_state[self.tid]['pending'][id]
-			task_state[task]['min'][id] = task_state[self.tid]['min'][id]
-			task_state[task]['max'][id] = task_state[self.tid]['max'][id]
-		for opcode in task_state[self.tid]['count_hv'].keys():
-			task_state[task]['count_hv'][opcode] = task_state[self.tid]['count_hv'][opcode]
-			task_state[task]['elapsed_hv'][opcode] = task_state[self.tid]['elapsed_hv'][opcode]
-			task_state[task]['pending_hv'][opcode] = task_state[self.tid]['pending_hv'][opcode]
-			task_state[task]['min_hv'][opcode] = task_state[self.tid]['min_hv'][opcode]
-			task_state[task]['max_hv'][opcode] = task_state[self.tid]['max_hv'][opcode]
+		tasks[new_tid] = tasks[self.tid]
+		if params.debug:
+			print_task_stats({new_tid: tasks[new_tid]})
 
-		del task_info[self.tid]
-		task_tids.remove(self.tid)
-		del task_state[self.tid]
+		del tasks[self.tid]
 
-		new_task(self.tid, self.pid, self.command, self.timestamp, 'idle')
-		task_state[self.tid]['sched_stat'] = True
-		EXEC = 11
+		task = Task(self.timestamp, self.command, 'idle', self.pid)
+		tasks[self.tid] = task
+		task.sched_stat = True
 		event = Event_sys_enter(self.timestamp, self.cpu, self.tid, self.command, EXEC, self.pid)
 		process_event(event)
 
@@ -760,23 +808,21 @@ class Event_sched_process_fork (Event):
 		self.mode = 'idle'
 
 	def process(self):
+		global CLONE
 		global start_timestamp, curr_timestamp
 		curr_timestamp = self.timestamp
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s [%03u] %7s/%06u:%s" % (self.timestamp, self.__class__.__name__, self.cpu, str(task_info[self.tid]['pid']), self.tid, self.command))
+		task = super(Event_sched_process_fork, self).process()
+		task.timestamp = self.timestamp
 
-		super(Event_sched_process_fork, self).process()
-		task_state[self.tid]['timestamp'] = self.timestamp
-
-		task_state[self.tid]['sched_stat'] = True
-		CLONE = 120
+		task.sched_stat = True
 		id = CLONE
-		task_state[self.tid]['resume-mode'] = 'sys'
-		task_state[self.tid]['id'] = id
-		task_state[self.tid]['sys_enter'] = self.timestamp
-		new_task_syscall(self.tid, id)
+		task.resume_mode = 'sys'
+		task.syscall = id
+		task.syscalls[id] = Call()
+		task.syscalls[id].timestamp = self.timestamp
 
 def sched__sched_process_fork(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
@@ -801,13 +847,10 @@ class Event_sched_process_exit (Event):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u %-9s %7s/%06u" % (self.timestamp, self.__class__.__name__, str(task_info[self.tid]['pid']), self.tid))
+		task = super(Event_sched_process_exit, self).process()
 
-		super(Event_sched_process_exit, self).process()
+		task.change_mode(self.timestamp, 'exit')
 
-		change_mode('exit', self.tid, self.timestamp)
-		task_state[self.tid]['exit'][self.cpu] = 0
-		
 def sched__sched_process_exit(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, perf_sample_dict):
@@ -833,24 +876,42 @@ class Event_sched_stat (Event):
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
-		debug_print("%016u sched_stat_%s(%7s/%06u,%s,%u) in %s" % (self.timestamp, self.bucket, str(task_info[self.tid]['pid']), self.tid, self.command, self.delta, task_state[self.tid]['mode']))
-
 		# sched_stat events can occur on any cpu
 		# so make sure this doesn't look like a migration
-		self.cpu = task_state[self.tid]['cpu']
+		try:
+			task = tasks[self.tid]
+			self.cpu = task.cpu
+		except:
+			# this is just a best guess
+			# for this never-seen-before task
+			self.cpu = cpu
 
-		super(Event_sched_stat, self).process()
+		task = super(Event_sched_stat, self).process()
 
-		if task_state[self.tid]['sched_stat'] == False:
-			task_state[self.tid]['sched_stat'] = True
+		if task.sched_stat == False:
+			task.sched_stat = True
 			if self.delta > self.timestamp - start_timestamp:
 				self.delta = self.timestamp - start_timestamp
 			else:
-				task_state[self.tid]['unaccounted'][self.cpu] = self.timestamp - start_timestamp - self.delta
-				debug_print("\tunaccounted = %u" % (task_state[self.tid]['unaccounted'][self.cpu]))
+				task.cpus[task.cpu].unaccounted = self.timestamp - start_timestamp - self.delta
+				debug_print("\tunaccounted = %u" % (task.cpus[task.cpu].unaccounted))
 
-		debug_print("\t%s %u + %u = %u" % (self.bucket, task_state[self.tid][self.bucket][self.cpu], self.delta, task_state[self.tid][self.bucket][self.cpu] + self.delta))
-		task_state[self.tid][self.bucket][self.cpu] += self.delta
+		# TODO: there's probably a better way to do this
+		if self.bucket == 'runtime':
+			debug_print("\t%s %u + %u = %u" % (self.bucket, task.cpus[task.cpu].runtime, self.delta, task.cpus[task.cpu].runtime + self.delta))
+			task.cpus[task.cpu].runtime += self.delta
+		elif self.bucket == 'sleep':
+			debug_print("\t%s %u + %u = %u" % (self.bucket, task.cpus[task.cpu].sleep, self.delta, task.cpus[task.cpu].sleep + self.delta))
+			task.cpus[task.cpu].sleep += self.delta
+		elif self.bucket == 'wait':
+			debug_print("\t%s %u + %u = %u" % (self.bucket, task.cpus[task.cpu].wait, self.delta, task.cpus[task.cpu].wait + self.delta))
+			task.cpus[task.cpu].wait += self.delta
+		elif self.bucket == 'blocked':
+			debug_print("\t%s %u + %u = %u" % (self.bucket, task.cpus[task.cpu].blocked, self.delta, task.cpus[task.cpu].blocked + self.delta))
+			task.cpus[task.cpu].blocked += self.delta
+		elif self.bucket == 'iowait':
+			debug_print("\t%s %u + %u = %u" % (self.bucket, task.cpus[task.cpu].iowait, self.delta, task.cpus[task.cpu].iowait + self.delta))
+			task.cpus[task.cpu].iowait += self.delta
 
 def sched__sched_stat_runtime(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
@@ -864,203 +925,151 @@ def sched__sched_stat_blocked(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
-	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'blocked')
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'blocked')
 	process_event(event)
 
 def sched__sched_stat_iowait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
-	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'iowait')
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'iowait')
 	process_event(event)
 
 def sched__sched_stat_wait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
-	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'wait')
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'wait')
 	process_event(event)
 
 def sched__sched_stat_sleep(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
-	event = Event_sched_stat(nsecs(common_secs,common_nsecs), task_state[pid]['cpu'], pid, comm, delay, 'sleep')
+	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'sleep')
 	process_event(event)
 
 #def trace_unhandled(event_name, context, event_fields_dict):
 #	pass
 
-def print_syscall_totals(tidlist):
+
+def print_task_CPU(cpuinfo):
+	print "%12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % (ns2ms(cpuinfo.user), ns2ms(cpuinfo.sys), ns2ms(cpuinfo.hv), ns2ms(cpuinfo.busy_unknown), ns2ms(cpuinfo.idle), ns2ms(cpuinfo.runtime), ns2ms(cpuinfo.sleep), ns2ms(cpuinfo.wait), ns2ms(cpuinfo.blocked), ns2ms(cpuinfo.blocked), ns2ms(cpuinfo.unaccounted)),
+	running = cpuinfo.user + cpuinfo.sys + cpuinfo.hv + cpuinfo.busy_unknown
+	print "| %5.1f%%" % ((float(running * 100) / float(running + cpuinfo.idle)) if running > 0 else 0),
+
+def report_calls(calls, id2name, process_calls, system_calls):
+	for id in calls:
+		calls[id].output_header()
+		print
+		break # I just need one to emit the header
+	for id in sorted(calls, key= lambda x: (calls[x].count, calls[x].elapsed), reverse=True):
+		if id not in process_calls:
+			process_calls[id] = Call()
+		process_calls[id].accumulate(calls[id])
+		if id not in system_calls:
+			system_calls[id] = Call()
+		system_calls[id].accumulate(calls[id])
+
+		calls[id].output(id, id2name(id))
+
+def print_task_stats(tasks):
 	pids = []
-	for task in sorted(tidlist):
-		pid = task_info[task]['pid']
+	for tid in tasks:
+		if tid == 0:
+			continue
+		pid = tasks[tid].pid
 		if pid not in pids:	
 			 pids.append(pid)
+	if not pids:
+		return
 	print "--  PID:"
-	all_user = 0
-	all_sys = 0
-	all_hv = 0
-	all_idle = 0
-	all_busy = 0
-	all_runtime = 0
-	all_sleep = 0
-	all_wait = 0
-	all_blocked = 0
-	all_iowait = 0
-	all_unaccounted = 0
-	all_migrations = 0
+	system = Task(0, 'ALL', 'all', 'ALL')
+	system_cpus_sum = CPU()
+	process = Task(0, 'PROCESS', 'all', pid)
+	process_cpus_sum = CPU()
+	task_cpus_sum = CPU()
 	for pid in sorted(pids):
 		if pid == 0:
 			continue
 		print "%7s:" % (str(pid))
-		proc_user = 0
-		proc_sys = 0
-		proc_hv = 0
-		proc_idle = 0
-		proc_busy = 0
-		proc_runtime = 0
-		proc_sleep = 0
-		proc_wait = 0
-		proc_blocked = 0
-		proc_iowait = 0
-		proc_unaccounted = 0
-		proc_migrations = 0
-		for task in sorted(tidlist):
-			if task_info[task]['pid'] == pid and task != 0:
-				print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
-				task_user = 0
-				task_sys = 0
-				task_hv = 0
-				task_idle = 0
-				task_busy = 0
-				task_runtime = 0
-				task_sleep = 0
-				task_wait = 0
-				task_blocked = 0
-				task_iowait = 0
-				task_unaccounted = 0
-				task_migrations = task_state[task]['migrations']
+		process.__init__(0, 'PROCESS', 'all', pid)
+		process_cpus_sum.__init__()
+		for tid in sorted(tasks):
+			if tid == 0:
+				continue
+			task = tasks[tid]
+			if task.pid == pid and task != 0:
+				task.output_header()
+				print
 				# each "comm" is delivered as a bytearray:
 				#   the actual command, a null terminator, and garbage
 				# "print" wants to splat every byte, including the garbage
 				# so, truncate the bytearray at the null
-				comm = null(task_info[task]['comm'])
-				for cpu in sorted(task_state[task]['sys'].keys()):
-					print "\t[%8s] %-20s %3u %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % (task, comm, cpu, ns2ms(task_state[task]['user'][cpu]), ns2ms(task_state[task]['sys'][cpu]), ns2ms(task_state[task]['hv'][cpu]), ns2ms(task_state[task]['busy-unknown'][cpu]), ns2ms(task_state[task]['idle'][cpu]), ns2ms(task_state[task]['runtime'][cpu]), ns2ms(task_state[task]['sleep'][cpu]), ns2ms(task_state[task]['wait'][cpu]), ns2ms(task_state[task]['blocked'][cpu]), ns2ms(task_state[task]['iowait'][cpu]), ns2ms(task_state[task]['unaccounted'][cpu]))
-					task_user += task_state[task]['user'][cpu]
-					task_sys += task_state[task]['sys'][cpu]
-					task_hv += task_state[task]['hv'][cpu]
-					task_idle += task_state[task]['idle'][cpu]
-					task_busy += task_state[task]['busy-unknown'][cpu]
-					task_running = task_user + task_sys + task_hv + task_busy
-					task_runtime += task_state[task]['runtime'][cpu]
-					task_sleep += task_state[task]['sleep'][cpu]
-					task_wait += task_state[task]['wait'][cpu]
-					task_blocked += task_state[task]['blocked'][cpu]
-					task_iowait += task_state[task]['iowait'][cpu]
-					task_unaccounted += task_state[task]['unaccounted'][cpu]
-				print "\t[%8s] %-20s ALL %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % (task, comm, ns2ms(task_user), ns2ms(task_sys), ns2ms(task_hv), ns2ms(task_busy), ns2ms(task_idle), ns2ms(task_runtime), ns2ms(task_sleep), ns2ms(task_wait), ns2ms(task_blocked), ns2ms(task_iowait), ns2ms(task_unaccounted), (float(task_running * 100) / float(task_running + task_idle)) if task_running > 0 else 0, task_migrations)
-				print
-				if task_state[task]['count']:
-					print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
-					for id in sorted(task_state[task]['count'].keys(), key= lambda x: (task_state[task]['count'][x], task_state[task]['elapsed'][x]), reverse=True):
-						count = task_state[task]['count'][id]
-						elapsed = task_state[task]['elapsed'][id]
-						pending = task_state[task]['pending'][id]
-						min = task_state[task]['min'][id]
-						max = task_state[task]['max'][id]
-						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), count, ns2ms(elapsed), ns2ms(pending)),
-						if count > 0:
-							print "%12.6f %12.6f %12.6f" % (ns2ms(elapsed)/count, ns2ms(min), ns2ms(max))
-						else:
-							print "%12s %12s %12s" % ("--", "--", "--")
-						if id not in task_state['ALL']['count'].keys():
-							new_task_syscall('ALL', id)
-						task_state['ALL']['count'][id] += count
-						task_state['ALL']['elapsed'][id] += elapsed
-						task_state['ALL']['pending'][id] += pending
-						if min < task_state['ALL']['min'][id]:
-							task_state['ALL']['min'][id] = min
-						if max > task_state['ALL']['max'][id]:
-							task_state['ALL']['max'][id] = max
+				comm = null(task.command)
+				task_cpus_sum.__init__()
+				for cpu in task.cpus:
+					print "\t[%8s] %-20s %3u" % (tid, comm, cpu),
+					task.cpus[cpu].output()
 					print
-				if task_state[task]['count_hv']:
-					print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("hvc", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
-					for opcode in sorted(task_state[task]['count_hv'].keys(), key= lambda x: (task_state[task]['count_hv'][x], task_state[task]['elapsed_hv'][x]), reverse=True):
-						count_hv = task_state[task]['count_hv'][opcode]
-						elapsed_hv = task_state[task]['elapsed_hv'][opcode]
-						pending_hv = task_state[task]['pending_hv'][opcode]
-						min_hv = task_state[task]['min_hv'][opcode]
-						max_hv = task_state[task]['max_hv'][opcode]
-						print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (opcode, hcall_name(opcode), count_hv, ns2ms(elapsed_hv), ns2ms(pending_hv)),
-						if count_hv > 0:
-							print "%12.6f %12.6f %12.6f" % (ns2ms(elapsed_hv)/count_hv, ns2ms(min_hv), ns2ms(max_hv))
-						else:
-							print "%12s %12s %12s" % ("--", "--", "--")
-						if opcode not in task_state['ALL']['count_hv'].keys():
-							new_task_hcall('ALL', opcode)
-						task_state['ALL']['count_hv'][opcode] += count_hv
-						task_state['ALL']['elapsed_hv'][opcode] += elapsed_hv
-						task_state['ALL']['pending_hv'][opcode] += pending_hv
-						if min_hv < task_state['ALL']['min_hv'][opcode]:
-							task_state['ALL']['min_hv'][opcode] = min_hv
-						if max_hv > task_state['ALL']['max_hv'][opcode]:
-							task_state['ALL']['max_hv'][opcode] = max_hv
-					print					
-				proc_user += task_user
-				proc_sys += task_sys
-				proc_hv += task_hv
-				proc_idle += task_idle
-				proc_busy += task_busy
-				proc_runtime += task_runtime
-				proc_sleep += task_sleep
-				proc_wait += task_wait
-				proc_blocked += task_blocked
-				proc_iowait += task_iowait
-				proc_unaccounted += task_unaccounted
-				proc_migrations += task_migrations
-		all_user += proc_user
-		all_sys += proc_sys
-		all_hv += proc_hv
-		all_idle += proc_idle
-		all_busy += proc_busy
-		all_runtime += proc_runtime
-		all_sleep += proc_sleep
-		all_wait += proc_wait
-		all_blocked += proc_blocked
-		all_iowait += proc_iowait
-		all_unaccounted += proc_unaccounted
-		all_migrations += proc_migrations
-		print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
-		print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % ("", ns2ms(proc_user), ns2ms(proc_sys), ns2ms(proc_hv), ns2ms(proc_busy), ns2ms(proc_idle), ns2ms(proc_runtime), ns2ms(proc_sleep), ns2ms(proc_wait), ns2ms(proc_blocked), ns2ms(proc_iowait), ns2ms(proc_unaccounted), (float((proc_user + proc_sys + + proc_hv + proc_busy) * 100) / float(proc_user + proc_sys + proc_hv + proc_busy + proc_idle)) if proc_user + proc_sys + proc_hv + proc_busy > 0 else 0, proc_migrations)
+					task_cpus_sum.accumulate(task.cpus[cpu])
+					if cpu not in process.cpus:
+						process.cpus[cpu] = CPU()
+					process.cpus[cpu].accumulate(task.cpus[cpu])
+				process_cpus_sum.accumulate(task_cpus_sum)
+				print "\t[%8s] %-20s ALL" % (tid, comm),
+				task_cpus_sum.output()
+				task.output_migrations()
+				print
+				process.migrations += task.migrations
+				print
+				if task.syscalls:
+					report_calls(task.syscalls, syscall_name, process.syscalls, system.syscalls)
+					print
+				if task.hcalls:
+					report_calls(task.hcalls, hcall_name, process.hcalls, system.hcalls)
+					print
+				task.output_header()
+				print
+				print "\t[     ALL] %-20s ALL" % (""),
+				process_cpus_sum.output()
+				process.output_migrations()
+				print
+				print
 
-	print
+		for cpu in process.cpus:
+			if cpu not in system.cpus:
+				system.cpus[cpu] = CPU()
+			system.cpus[cpu].accumulate(process.cpus[cpu])
+		system_cpus_sum.accumulate(process_cpus_sum)
+		system.migrations += process.migrations
 
 	print "%7s:" % ("ALL")
-	print "     -- [%8s] %-20s %3s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%% %6s" % ("task", "command", "cpu", "user", "sys", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util", "moves")
-	# is it correct to add in hv here?
-	print "\t[     ALL] %-20s ALL %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %5.1f%% %6u" % ("", ns2ms(all_user), ns2ms(all_sys), ns2ms(all_hv), ns2ms(all_busy), ns2ms(all_idle), ns2ms(all_runtime), ns2ms(all_sleep), ns2ms(all_wait), ns2ms(all_blocked), ns2ms(all_iowait), ns2ms(all_unaccounted), (float((all_user + all_sys + all_hv + all_busy) * 100) / float(all_user + all_sys + all_hv + all_busy + all_idle)) if all_user + all_sys + all_hv + all_busy > 0 else 0, all_migrations)
+	for tid in tasks:
+		tasks[tid].output_header()
+		print
+		break # I just need one to emit the header
+	print "\t[     ALL] %-20s ALL" % (""),
+	system_cpus_sum.output()
+	system.output_migrations()
 	print
-	if task_state['ALL']['count']:
-		print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("id", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
-		for id in sorted(task_state['ALL']['count'].keys(), key= lambda x: (task_state['ALL']['count'][x], task_state['ALL']['elapsed'][x]), reverse=True):
-			print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, syscall_name(id), task_state['ALL']['count'][id], ns2ms(task_state['ALL']['elapsed'][id]), ns2ms(task_state['ALL']['pending'][id])),
-			if task_state['ALL']['count'][id] > 0:
-				print "%12.6f %12.6f %12.6f" % (ns2ms(task_state['ALL']['elapsed'][id]/task_state['ALL']['count'][id]), ns2ms(task_state['ALL']['min'][id]), ns2ms(task_state['ALL']['max'][id]))
-			else:
-				print "%12s %12s %12s" % ("--", "--", "--")
+	print
+	if system.syscalls:
+		for id in system.syscalls:
+			system.syscalls[id].output_header()
+			print
+			break # I just need one to emit the header
+		for id in sorted(system.syscalls, key= lambda x: (system.syscalls[x].count, system.syscalls[x].elapsed), reverse=True):
+			system.syscalls[id].output(id, syscall_name(id))
 		print
 
-	if task_state['ALL']['count_hv']:
-		print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("hvc", "name", "count", "elapsed", "pending", "average", "minimum", "maximum")
-		for opcode in sorted(task_state['ALL']['count_hv'].keys(), key= lambda x: (task_state['ALL']['count_hv'][x], task_state['ALL']['elapsed_hv'][x]), reverse=True):
-			print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (opcode, hcall_name(opcode), task_state['ALL']['count_hv'][opcode], ns2ms(task_state['ALL']['elapsed_hv'][opcode]), ns2ms(task_state['ALL']['pending_hv'][opcode])),
-			if task_state['ALL']['count_hv'][opcode] > 0:
-				print "%12.6f %12.6f %12.6f" % (ns2ms(task_state['ALL']['elapsed_hv'][opcode]/task_state['ALL']['count_hv'][opcode]), ns2ms(task_state['ALL']['min_hv'][opcode]), ns2ms(task_state['ALL']['max_hv'][opcode]))
-			else:
-				print "%12s %12s %12s" % ("--", "--", "--")
+	if system.hcalls:
+		for id in system.hcalls:
+			system.hcalls[id].output_header()
+			print
+			break # I just need one to emit the header
+		for id in sorted(system.hcalls, key= lambda x: (system.hcalls[x].count, system.hcalls[x].elapsed), reverse=True):
+			system.hcalls[id].output(id, hcall_name(id))
 		print
 
-	del task_state['ALL']
 	print "Total Trace Time: %f ms" % ns2ms(curr_timestamp - start_timestamp)
