@@ -14,21 +14,46 @@ if 'PERF_EXEC_PATH' in os.environ:
 
 usage = "perf script -s ./curt.py";
 
+parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
+	description='''
+Process a perf format trace file containing some of the following event sets:
+- raw_syscalls:sys_enter, raw_syscalls:sys_exit
+- sched:sched_switch
+- sched:sched_migrate_task
+- sched:sched_process_fork, sched:sched_process_exec, sched:sched_process_exit
+- sched:sched_stat_runtime, sched:sched_stat_blocked, sched:sched_stat_iowait, sched:sched_stat_wait, sched:sched_stat_sleep
+- powerpc:hcall_entry, powerpc:hcall_exit
+
+Report the following statistics
+- per-process, perf-task, per-CPU:
+  - user, system, hypervisor, idle time
+  - runtime, sleep, wait, blocked, iowait time
+  - utilization
+  - migrations
+  - per-syscall, per-hcall:
+    - count, elapse, pending, average, minimum, maximum
+''')
+parser.add_argument('--debug', action='store_true', help='enable debugging output')
+parser.add_argument('--window', type=int, help='maximum event sequence length for correcting out-of-order events', default=20)
+parser.add_argument('--api', type=int, help='use newer(2) perf API', default=1)
+parser.add_argument('file', nargs='?', help='the perf format data file to process', default='perf.data')
+params = parser.parse_args()
+
 try:
 	from perf_trace_context import *
 except:
-	print "This script must be run under perf:"
-	print "\t" + usage
+	print "Relaunching under \"perf\" command..."
+	sys.argv = ['perf', 'script', '-i', params.file, '-s', sys.argv[0] ]
+	sys.argv.append('--')
+	sys.argv += ['--window', str(params.window)]
+	if params.debug:
+		sys.argv.append('--debug')
+	sys.argv += ['--api', str(params.api)]
+	os.execvp("perf", sys.argv)
 	sys.exit(1)
 
 from Core import *
 from Util import *
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--debug', action='store_true', help='enable debugging output')
-parser.add_argument('--window', type=int, help='enable debugging output', default=20)
-parser.add_argument('--api', type=int, help='use newer(2) perf API', default=1)
-params = parser.parse_args()
 
 global start_timestamp, curr_timestamp
 
