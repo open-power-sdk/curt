@@ -423,7 +423,7 @@ def process_event(event):
 		# because event.process() could reenter here
 		del events[0]
 		if event.timestamp < curr_timestamp:
-			print "OUT OF ORDER"
+			sys.stderr.write("Error: OUT OF ORDER events detected.\n  Try increasing the size of the look-ahead window with --window=<n>\n")
 		event.process()
 		if params.debug:
 			print_task_stats({event.tid: tasks[event.tid]})
