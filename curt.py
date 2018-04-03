@@ -62,6 +62,7 @@ class CPU:
 		self.sys = 0
 		self.user = 0
 		self.idle = 0
+		self.irq = 0
 		self.hv = 0
 		self.busy_unknown = 0
 		self.runtime = 0
@@ -74,6 +75,7 @@ class CPU:
 	def accumulate(self, cpu):
 		self.user += cpu.user
 		self.sys += cpu.sys
+		self.irq += cpu.irq
 		self.hv += cpu.hv
 		self.idle += cpu.idle
 		self.busy_unknown += cpu.busy_unknown
@@ -85,14 +87,14 @@ class CPU:
 		self.unaccounted += cpu.unaccounted
 
 	def output_header(self):
-		print "%12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%%" % \
-			("user", "sys", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util"),
+		print "%12s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%%" % \
+			("user", "sys", "irq", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util"),
 
 	def output(self):
-		print "%12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % \
-			(ns2ms(self.user), ns2ms(self.sys), ns2ms(self.hv), ns2ms(self.busy_unknown), ns2ms(self.idle), \
+		print "%12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % \
+			(ns2ms(self.user), ns2ms(self.sys), ns2ms(self.irq), ns2ms(self.hv), ns2ms(self.busy_unknown), ns2ms(self.idle), \
 			ns2ms(self.runtime), ns2ms(self.sleep), ns2ms(self.wait), ns2ms(self.blocked), ns2ms(self.blocked), ns2ms(self.unaccounted)),
-		running = self.user + self.sys + self.hv + self.busy_unknown
+		running = self.user + self.sys + self.irq + self.hv + self.busy_unknown
 		print "| %5.1f%%" % ((float(running * 100) / float(running + self.idle)) if running > 0 else 0),
 
 class Call:
@@ -139,6 +141,9 @@ class Task:
 		self.syscall = 'unknown'
 		self.syscall_timestamp = 0
 		self.syscalls = {}
+		self.irq = 'unknown'
+		self.irq_timestamp = 0
+		self.irqs = {}
 		self.hcall = 'unknown'
 		self.hcall_timestamp = 0
 		self.hcalls = {}
@@ -155,6 +160,9 @@ class Task:
 		elif self.mode == 'idle':
 			self.cpus[self.cpu].idle += delta
 			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].idle - delta, delta, self.cpus[self.cpu].idle))
+		elif self.mode == 'irq':
+			self.cpus[self.cpu].irq += delta
+			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].irq - delta, delta, self.cpus[self.cpu].irq))
 		elif self.mode == 'hv':
 			self.cpus[self.cpu].hv += delta
 			debug_print("\t%s[%03u] = %u + %u = %u" % (self.mode, self.cpu, self.cpus[self.cpu].hv - delta, delta, self.cpus[self.cpu].hv))
@@ -313,6 +321,13 @@ def hcall_name(opcode):
 	except:
 		return str(opcode)
 
+irq_to_name = {}
+
+def irq_name(irq):
+	if irq in irq_to_name:
+		return irq_to_name[irq]
+	return str(irq)
+
 CLONE = 0
 EXEC = 0
 
@@ -355,6 +370,16 @@ def trace_end():
 			cpu.runtime += delta
 			debug_print("task %7s/%06u syscall %s pending time %f + %f = %fms" % (str(task.pid), tid, syscall_name(task.syscall), syscall.pending - delta, delta, syscall.pending))
 			debug_print("task %7s/%06u (%s) sys time %f + %f = %fms" % (str(task.pid), tid, syscall_name(task.syscall), task.cpus[task.cpu].sys - delta, delta, task.cpus[task.cpu].sys))
+
+		elif task.mode == 'irq':
+			delta = curr_timestamp - task.irqs[task.irq].timestamp
+			opcode = task.irq
+			cpu = task.cpu
+			task.irqs[opcode].pending += delta
+			task.cpus[cpu].irq += delta
+			task.cpus[cpu].runtime += delta
+			debug_print("task %7s/%06u irq %s pending time %f + %f = %fms" % (str(task.pid), tid, irq_name(opcode), task.irqs[opcode].pending - delta, delta, task.irqs[opcode].pending))
+			debug_print("task %7s/%06u (%s) irq time %f + %f = %fms" % (str(task.pid), tid, irq_name(opcode), task.cpus[cpu].irq - delta, delta, task.cpus[cpu].irq))
 
 		elif task.mode == 'hv':
 			delta = curr_timestamp - task.hcalls[task.hcall].timestamp
@@ -600,7 +625,7 @@ class Event_hcall_entry ( Event ):
 
 		task = super(Event_hcall_entry, self).process()
 
-		task.resume_mode = self.mode
+		task.resume_mode = task.mode
 		task.hcall = self.opcode
 		if self.opcode not in task.hcalls:
 			task.hcalls[self.opcode] = Call()
@@ -686,6 +711,114 @@ def powerpc__hcall_exit_old(event_name, context, common_cpu, common_secs, common
 
 	global dummy_dict
 	powerpc__hcall_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval, dummy_dict)
+
+class Event_irq_handler_entry ( Event ):
+
+	def __init__(self, timestamp, cpu, tid, comm, irq, name, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.irq = irq
+		self.name = name
+		self.pid = pid
+		self.mode = 'busy-unknown'
+
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
+
+		task = super(Event_irq_handler_entry, self).process()
+
+		task.resume_mode = task.mode
+		task.irq = self.irq
+		if self.irq not in task.irqs:
+			task.irqs[self.irq] = Call()
+
+		task.irqs[self.irq].timestamp = curr_timestamp
+		task.change_mode(curr_timestamp, 'irq')
+
+def irq__irq_handler_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, perf_sample_dict):
+
+	event = Event_irq_handler_entry(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, irq, name, getpid(perf_sample_dict))
+	process_event(event)
+
+def irq__irq_handler_entry_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name):
+
+	global dummy_dict
+	irq_to_name[irq] = name
+	irq__irq_handler_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, dummy_dict)
+
+class Event_irq_handler_exit ( Event ):
+
+	def __init__(self, timestamp, cpu, tid, comm, irq, pid):
+		self.timestamp = timestamp
+		self.cpu = cpu
+		self.tid = tid
+		self.command = comm
+		self.irq = irq
+		self.pid = pid
+		self.mode = 'busy-unknown'
+
+	def process(self):
+		global start_timestamp, curr_timestamp
+		curr_timestamp = self.timestamp
+		if (start_timestamp == 0):
+			start_timestamp = curr_timestamp
+
+		task = super(Event_irq_handler_exit, self).process()
+
+		pending = False
+
+		if task.mode == 'busy-unknown':
+			task.mode = 'irq'
+			for cpu in task.cpus:
+				task.cpus[cpu].irq = task.cpus[cpu].busy_unknown
+				task.cpus[cpu].busy_unknown = 0
+			pending = True
+
+		if self.irq not in task.irqs:
+			task.irqs[self.irq] = Call()
+			task.irqs[self.irq].timestamp = start_timestamp
+
+		if pending:
+			delta = curr_timestamp - start_timestamp
+			task.irqs[self.irq].pending = delta
+			debug_print("\tirq %s pending time %uns" % (irq_name(self.irq), task.irqs[self.irq].pending))
+		else:
+			delta = curr_timestamp - task.irqs[self.irq].timestamp
+			task.irqs[self.irq].count += 1
+			task.irqs[self.irq].elapsed += delta 
+			debug_print("\tdelta = %u min = %u max = %u" % (delta, task.irqs[self.irq].min, task.irqs[self.irq].max))
+			if delta < task.irqs[self.irq].min:
+				debug_print("\t%s min %u" % (irq_name(self.irq), delta))
+				task.irqs[self.irq].min = delta
+			if delta > task.irqs[self.irq].max:
+				debug_print("\t%s max %u" % (irq_name(self.irq), delta))
+				task.irqs[self.irq].max = delta
+			debug_print("\tirq %s count %u time %uns elapsed %uns" % (irq_name(self.irq), task.irqs[self.irq].count, delta, task.irqs[self.irq].elapsed))
+
+		if task.cpu != self.cpu:
+			debug_print("migration within irq!")
+			task.migrations += 1
+			delta /= 2
+			debug_print("\tmigrations %u irq %u + %u = %u" % (task.irqs[self.irq].migrations, task.cpus[task.cpu].irq - delta, delta, task.cpus[task.cpu].irq))
+			task.cpus[task.cpu].irq += delta
+			task.irqs[self.irq].timestamp += delta
+
+		task.change_mode(curr_timestamp, task.resume_mode)
+
+def irq__irq_handler_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret, perf_sample_dict):
+
+	event = Event_irq_handler_exit(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, irq, getpid(perf_sample_dict))
+	process_event(event)
+
+def irq__irq_handler_exit_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret):
+
+	global dummy_dict
+	irq__irq_handler_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret, dummy_dict)
 
 class Event_sched_switch_out (Event):
 
@@ -1169,13 +1302,17 @@ def print_task_stats(tasks):
 				if task.hcalls:
 					report_calls(task.hcalls, hcall_name, process.hcalls, system.hcalls)
 					print
-				task.output_header()
-				print
-				print "\t[     ALL] %-20s ALL" % (""),
-				process_cpus_sum.output()
-				process.output_migrations()
-				print
-				print
+				if task.irqs:
+					report_calls(task.irqs, irq_name, process.irqs, system.irqs)
+					print
+
+		process.output_header()
+		print
+		print "\t[     ALL] %-20s ALL" % (""),
+		process_cpus_sum.output()
+		process.output_migrations()
+		print
+		print
 
 		for cpu in process.cpus:
 			if cpu not in system.cpus:
@@ -1212,6 +1349,15 @@ def print_task_stats(tasks):
 			system.hcalls[id].output(id, hcall_name(id))
 		print
 
+	if system.irqs:
+		for id in system.irqs:
+			system.irqs[id].output_header()
+			print
+			break # I just need one to emit the header
+		for id in sorted(system.irqs, key= lambda x: (system.irqs[x].count, system.irqs[x].elapsed), reverse=True):
+			system.irqs[id].output(id, irq_name(id))
+		print
+
 	print "Total Trace Time: %f ms" % ns2ms(curr_timestamp - start_timestamp)
 
 if params.api == 1:
@@ -1222,6 +1368,8 @@ if params.api == 1:
 	raw_syscalls__sys_exit = raw_syscalls__sys_exit_old
 	powerpc__hcall_entry = powerpc__hcall_entry_old
 	powerpc__hcall_exit = powerpc__hcall_exit_old
+	irq__irq_handler_entry = irq__irq_handler_entry_old
+	irq__irq_handler_exit = irq__irq_handler_exit_old
 	sched__sched_switch = sched__sched_switch_old
 	sched__sched_migrate_task = sched__sched_migrate_task_old
 	sched__sched_process_exec = sched__sched_process_exec_old
@@ -1237,6 +1385,8 @@ else:
 	raw_syscalls__sys_exit = raw_syscalls__sys_exit_new
 	powerpc__hcall_entry = powerpc__hcall_entry_new
 	powerpc__hcall_exit = powerpc__hcall_exit_new
+	irq__irq_handler_entry = irq__irq_handler_entry_new
+	irq__irq_handler_exit = irq__irq_handler_exit_new
 	sched__sched_switch = sched__sched_switch_new
 	sched__sched_migrate_task = sched__sched_migrate_task_new
 	sched__sched_process_exec = sched__sched_process_exec_new
