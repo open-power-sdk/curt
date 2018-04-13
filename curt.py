@@ -461,6 +461,7 @@ class Event (object):
 		self.tid = 0
 		self.command = 'unknown'
 		self.mode = 'unknown'
+		self.pid = 0
 
 	def process(self):
 		global start_timestamp
@@ -480,8 +481,10 @@ class Event (object):
 		if self.cpu not in task.cpus:
 			debug_print("\tnew CPU")
 			task.cpus[self.cpu] = CPU()
-			task.cpu = self.cpu
-		elif self.cpu != task.cpu:
+			if task.cpu == 'unknown':
+				task.cpu = self.cpu
+
+		if self.cpu != task.cpu:
 			task.cpu = self.cpu
 			task.migrations += 1
 
