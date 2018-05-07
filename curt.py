@@ -745,13 +745,13 @@ class Event_irq_handler_entry ( Event ):
 
 def irq__irq_handler_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, perf_sample_dict):
 
+	irq_to_name[irq] = name
 	event = Event_irq_handler_entry(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, irq, name, getpid(perf_sample_dict))
 	process_event(event)
 
 def irq__irq_handler_entry_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name):
 
 	global dummy_dict
-	irq_to_name[irq] = name
 	irq__irq_handler_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, dummy_dict)
 
 class Event_irq_handler_exit ( Event ):
