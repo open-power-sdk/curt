@@ -16,13 +16,17 @@ usage = "perf script -s ./curt.py";
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
 	description='''
-Process a perf format trace file containing some of the following event sets:
+Process a perf format trace file containing some or all of the following event sets:
 - raw_syscalls:sys_enter, raw_syscalls:sys_exit
 - sched:sched_switch
 - sched:sched_migrate_task
 - sched:sched_process_fork, sched:sched_process_exec, sched:sched_process_exit
 - sched:sched_stat_runtime, sched:sched_stat_blocked, sched:sched_stat_iowait, sched:sched_stat_wait, sched:sched_stat_sleep
+- irq:irq_handler_entry, irq:irq_handler_exit
 - powerpc:hcall_entry, powerpc:hcall_exit
+
+Record using perf:
+$ perf record -e '{raw_syscalls:sys_enter,raw_syscalls:sys_exit, ...}' command
 
 Report the following statistics
 - per-process, perf-task, per-CPU:
