@@ -14,8 +14,6 @@ if 'PERF_EXEC_PATH' in os.environ:
 	sys.path.append(os.environ['PERF_EXEC_PATH'] + \
 		'/scripts/python/Perf-Trace-Util/lib/Perf/Trace')
 
-usage = "perf script -s ./curt.py";
-
 parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
 	description='''
 Report system-wide utilization statistics
