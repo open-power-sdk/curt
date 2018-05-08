@@ -1175,9 +1175,7 @@ class Event_sched_stat (Event):
 			task = tasks[self.tid]
 			self.cpu = task.cpu
 		except:
-			# this is just a best guess
-			# for this never-seen-before task
-			self.cpu = cpu
+			pass
 
 		task = super(Event_sched_stat, self).process()
 
