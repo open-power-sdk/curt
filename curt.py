@@ -7,6 +7,8 @@ import os
 import sys
 import string
 import argparse
+import platform
+import subprocess
 
 if 'PERF_EXEC_PATH' in os.environ:
 	sys.path.append(os.environ['PERF_EXEC_PATH'] + \
@@ -16,6 +18,8 @@ usage = "perf script -s ./curt.py";
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
 	description='''
+Report system-wide utilization statistics
+
 Process a perf format trace file containing some or all of the following event sets:
 - raw_syscalls:sys_enter, raw_syscalls:sys_exit
 - sched:sched_switch
@@ -25,9 +29,6 @@ Process a perf format trace file containing some or all of the following event s
 - irq:irq_handler_entry, irq:irq_handler_exit
 - powerpc:hcall_entry, powerpc:hcall_exit
 
-Record using perf:
-$ perf record -e '{raw_syscalls:sys_enter,raw_syscalls:sys_exit, ...}' command
-
 Report the following statistics
 - per-process, perf-task, per-CPU:
   - user, system, hypervisor, idle time
@@ -36,23 +37,81 @@ Report the following statistics
   - migrations
   - per-syscall, per-hcall:
     - count, elapse, pending, average, minimum, maximum
+''',
+	epilog='''
+Record using perf (to perf.data file):
+$ perf record -e '{raw_syscalls:sys_enter,raw_syscalls:sys_exit, ...}' command
+
+Generate report (from perf.data file):
+$ ./curt.py
+
+Or, record and report in a single step:
+$ ./curt.py --record all command
 ''')
 parser.add_argument('--debug', action='store_true', help='enable debugging output')
 parser.add_argument('--window', type=int, help='maximum event sequence length for correcting out-of-order events', default=20)
 parser.add_argument('--api', type=int, help='use newer(2) perf API', default=1)
-parser.add_argument('file', nargs='?', help='the perf format data file to process', default='perf.data')
+parser.add_argument('--record',
+	metavar='EVENTLIST',
+	help="record events (instead of generating report). "
+		"Specify event group(s) as a comma-separated list from "
+		"{all,sched,stats,syscalls,irqs,hcalls}.")
+parser.add_argument('file_or_command',
+	nargs='*',
+	help="the perf format data file to process (default: \"perf.data\"), or "
+		"the command string to record (with \"--record\")",
+	metavar='ARG',
+	default='perf.data')
 params = parser.parse_args()
+
+if params.record:
+	eventlist = ''
+	comma = ''
+	groups = params.record.split(',')
+	if 'all' in groups or 'sched' in groups:
+		eventlist = eventlist + comma + "sched:sched_switch," \
+		"sched:sched_process_fork,sched:sched_process_exec," \
+		"sched:sched_process_exit"
+		comma = ','
+	if 'all' in groups or 'syscalls' in groups:
+		eventlist = eventlist + comma + \
+			'raw_syscalls:sys_enter,raw_syscalls:sys_exit'
+		comma = ','
+	if 'all' in groups or 'irqs' in groups:
+		eventlist = eventlist + comma + \
+			'irq:irq_handler_entry,irq:irq_handler_exit'
+		comma = ','
+	if ('all' in groups or 'hcalls' in groups) \
+		and platform.machine()[0:3] == 'ppc':
+
+		eventlist = eventlist + comma + \
+			'powerpc:hcall_entry,powerpc:hcall_exit'
+		comma = ','
+	if 'all' in groups or 'stats' in groups:
+		eventlist = eventlist + comma + "sched:sched_stat_runtime," \
+		"sched:sched_stat_blocked,sched:sched_stat_iowait," \
+		"sched:sched_stat_wait,sched:sched_stat_sleep"
+		comma = ','
+	eventlist = '{' + eventlist + '}'
+	command = ['perf', 'record', '--quiet', '--all-cpus',
+		'--event', eventlist ] + params.file_or_command
+	if params.debug:
+		print command
+	subprocess.call(command)
+	params.file_or_command = "perf.data"
 
 try:
 	from perf_trace_context import *
 except:
 	print "Relaunching under \"perf\" command..."
-	sys.argv = ['perf', 'script', '-i', params.file, '-s', sys.argv[0] ]
+	sys.argv = ['perf', 'script', '-i', params.file_or_command, '-s', sys.argv[0] ]
 	sys.argv.append('--')
 	sys.argv += ['--window', str(params.window)]
 	if params.debug:
 		sys.argv.append('--debug')
 	sys.argv += ['--api', str(params.api)]
+	if params.debug:
+		print sys.argv
 	os.execvp("perf", sys.argv)
 	sys.exit(1)
 
