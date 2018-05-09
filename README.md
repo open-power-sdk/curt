@@ -1,14 +1,19 @@
 # Project Description
 This project calculates utilization statistics:
-1. What percentage of time is each process/task running, divided into "user" and "system" time
+1. What percentage of time is each process/task running, divided into "user", "system", "interrupt", "hcall" time
 1. Idle time is broken down into sleep, wait, blocked, and I/O wait
 1. System time is further divided among syscalls, with an invocation count, elapsed time, running (system) time, idle time, minimum, maximum, and average call duration
+1. Interrupt time is further divided among IRQs, with a per-IRQ count, elapsed time, running time, idle time, minimum, maximum, and average interrupt duration
 1. Task migrations
-1. Hypervisor calls are tracked per task, per process, and system wide, with invocation count, elapsed time, running (system) time, minimum, maximum, and average call duration
+1. Hypervisor calls are tracked per task, per process, and system wide, with invocation count, elapsed time, running time, minimum, maximum, and average call duration
 
 Usage is a two-step process (described in more detail below):
-1. Collect trace data using `perf`
-1. Process collected data using `perf` with this project's Python script
+1. Collect trace data using `perf`.
+1. Process collected data.
+
+or:
+
+Record and report in one step.
 
 ## Contributing to the project
 We welcome contributions to the curt project in many forms. There's always plenty to do! Full details of how to contribute to this project are documented in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
@@ -52,6 +57,23 @@ Currently, the only project file used in processing is `curt.py`.  One could dow
       /usr/bin/sudo apt-get install python-audit
       ```
 
+### Collect and process trace data in one step
+
+1. ./curt.py --record all *command --args*
+
+A subset of events can be specified to limit the size of the trace file, or because some statistics are not needed.
+
+The `--record` option can take any combination of the following event groups in a comma-separated list:
+
+| group name | events | statistics |
+| --- | --- | --- |
+| sched | `sched:sched_switch`, `sched:sched_process_exec`, `sched:sched_process_fork`, `sched:sched_process_exit` | per-task user, system, hypervisor, idle time |
+| sched | `sched:sched_migrate_task` | accurate migrations and per-cpu statistics |
+| stat | `sched:sched_stat_runtime`, `sched:sched_stat_wait`, `sched:sched_stat_sleep`, `sched:sched_stat_blocked`, `sched:sched_stat_iowait` | per-task idle-time classification |
+| syscalls | `raw_syscalls:sys_enter`, `raw_syscalls:sys_exit` | system call statistics |
+| irqs | `irq:irq_handler_entry`, `irq:irq_handler_exit` | interrupt statistics |
+| hcalls | `powerpc:hcall_entry`, `powerpc:hcall_exit` | hypervisor call statistics (POWER architecture only) |
+
 ### Collect trace data
 
 1. Simple!
@@ -67,6 +89,7 @@ If some statistics are not needed, not all events need be traced.  This can be h
 | `sched:sched_migrate_task` | accurate migrations and per-cpu statistics |
 | `sched:sched_stat_runtime`, `sched:sched_stat_wait`, `sched:sched_stat_sleep`, `sched:sched_stat_blocked`, `sched:sched_stat_iowait` | per-task idle-time classification |
 | `raw_syscalls:sys_enter`, `raw_syscalls:sys_exit` | system call statistics |
+| `irq:irq_handler_entry`, `irq:irq_handler_exit` | interrupt statistics |
 | `powerpc:hcall_entry`, `powerpc:hcall_exit` | hypervisor call statistics (POWER architecture only) |
 
 ### Process trace data
