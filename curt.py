@@ -55,7 +55,7 @@ parser.add_argument('--record',
 		"Specify event group(s) as a comma-separated list from "
 		"{all,sched,stats,syscalls,irqs,hcalls}.")
 parser.add_argument('file_or_command',
-	nargs='*',
+	nargs=argparse.REMAINDER,
 	help="the perf format data file to process (default: \"perf.data\"), or "
 		"the command string to record (with \"--record\")",
 	metavar='ARG',
