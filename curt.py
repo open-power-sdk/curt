@@ -3,6 +3,9 @@
 # Project name: curt
 # This project is licensed under the GPL License 2.0, see LICENSE.
 
+# Delete this line
+
+
 import os
 import sys
 import string
