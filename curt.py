@@ -3,6 +3,8 @@
 # Project name: curt
 # This project is licensed under the GPL License 2.0, see LICENSE.
 
+# new line
+
 import os
 import sys
 import string
