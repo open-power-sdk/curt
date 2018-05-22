@@ -3,9 +3,6 @@
 # Project name: curt
 # This project is licensed under the GPL License 2.0, see LICENSE.
 
-# Delete this line
-
-
 import os
 import sys
 import string
@@ -1371,13 +1368,23 @@ def print_task_stats(tasks):
 					report_calls(task.irqs, irq_name, process.irqs, system.irqs)
 					print
 
-		process.output_header()
-		print
-		print "\t[     ALL] %-20s ALL" % (""),
-		process_cpus_sum.output()
-		process.output_migrations()
-		print
-		print
+				# Adding per cpu per process info
+				process.output_header()
+				print
+				############################################
+				print 'Per CPU per process--START'
+				for cpu in process.cpus:
+					print "\t[%8s] %-20s %3u" % (pid, comm, cpu),
+					process.cpus[cpu].output()
+					print
+				print 'Per CPU per process--END'
+				############################################
+
+				print "\t[     ALL] %-20s ALL" % (""),
+				process_cpus_sum.output()
+				process.output_migrations()
+				print
+				print
 
 		for cpu in process.cpus:
 			if cpu not in system.cpus:
