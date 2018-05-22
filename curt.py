@@ -96,13 +96,15 @@ if params.record:
 	if params.debug:
 		print command
 	subprocess.call(command)
-	params.file_or_command = "perf.data"
+	params.file_or_command = []
 
 try:
 	from perf_trace_context import *
 except:
 	print "Relaunching under \"perf\" command..."
-	sys.argv = ['perf', 'script', '-i', params.file_or_command, '-s', sys.argv[0] ]
+	if len(params.file_or_command) == 0:
+		params.file_or_command = [ "perf.data" ]
+	sys.argv = ['perf', 'script', '-i' ] + params.file_or_command + [ '-s', sys.argv[0] ]
 	sys.argv.append('--')
 	sys.argv += ['--window', str(params.window)]
 	if params.debug:
