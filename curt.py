@@ -1369,15 +1369,15 @@ def print_task_stats(tasks):
 					print
 
 				# Adding per cpu per process info
-				process.output_header()
+				# process.output_header()
 				print
 				############################################
-				print 'Per CPU per process--START'
-				for cpu in process.cpus:
-					print "\t[%8s] %-20s %3u" % (pid, comm, cpu),
-					process.cpus[cpu].output()
-					print
-				print 'Per CPU per process--END'
+				#print 'Per CPU per process--START'
+				#for cpu in process.cpus:
+					#print "\t[%8s] %-20s %3u" % (pid, comm, cpu),
+					#process.cpus[cpu].output()
+					#print
+				#print 'Per CPU per process--END'
 				############################################
 
 				print "\t[     ALL] %-20s ALL" % (""),
@@ -1385,6 +1385,19 @@ def print_task_stats(tasks):
 				process.output_migrations()
 				print
 				print
+
+
+		print 'Per CPU per process--START'
+		# Adding per cpu per process info
+		process.output_header()
+		print
+		############################################
+		for cpu in process.cpus:
+			print "\t[%8s] %-20s %3u" % (pid, comm, cpu),
+			process.cpus[cpu].output()
+			print
+		print 'Per CPU per process--END'
+		############################################
 
 		for cpu in process.cpus:
 			if cpu not in system.cpus:
