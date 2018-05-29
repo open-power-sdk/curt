@@ -1368,36 +1368,26 @@ def print_task_stats(tasks):
 					report_calls(task.irqs, irq_name, process.irqs, system.irqs)
 					print
 
-				# Adding per cpu per process info
-				# process.output_header()
-				print
-				############################################
-				#print 'Per CPU per process--START'
-				#for cpu in process.cpus:
-					#print "\t[%8s] %-20s %3u" % (pid, comm, cpu),
-					#process.cpus[cpu].output()
-					#print
-				#print 'Per CPU per process--END'
-				############################################
-
-				print "\t[     ALL] %-20s ALL" % (""),
-				process_cpus_sum.output()
-				process.output_migrations()
-				print
-				print
-
-
-		print 'Per CPU per process--START'
 		# Adding per cpu per process info
-		process.output_header()
-		print
-		############################################
+		# process.output_header()
+		# print
+		print "     -- [%8s] %-20s %3s" % ("pid", "command", "cpu"),
 		for cpu in process.cpus:
+			process.cpus[cpu].output_header()
+			break # emit only header
+		print "%6s" % ("moves"),
+		print
+
+		for cpu in process.cpus:
+			#print "\t[%8s] %-20s %3u" % ('ALL', comm, cpu),
 			print "\t[%8s] %-20s %3u" % (pid, comm, cpu),
 			process.cpus[cpu].output()
 			print
-		print 'Per CPU per process--END'
-		############################################
+		print "\t[     ALL] %-20s ALL" % (""),
+		process_cpus_sum.output()
+		process.output_migrations()
+		print 
+		print 
 
 		for cpu in process.cpus:
 			if cpu not in system.cpus:
