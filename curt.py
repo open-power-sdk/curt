@@ -391,23 +391,17 @@ def irq_name(irq):
 		return irq_to_name[irq]
 	return str(irq)
 
-CLONE = 0
 EXEC = 0
 
 def trace_begin():
-	global CLONE, EXEC
+	global EXEC
 	# find the (architecture-specific) syscall numbers
 	# to be used later in synthetic trace events
 	id = 0
-	while (CLONE == 0 or EXEC == 0) and id < 512:
-		if syscall_name(id) == "clone":
-			CLONE = id
-		elif syscall_name(id) == "execve":
+	while (EXEC == 0) and id < 512:
+		if syscall_name(id) == "execve":
 			EXEC = id
 		id += 1
-	if CLONE == 0:
-		print "syscall number for CLONE not found"
-		sys.exit(1)
 	if EXEC == 0:
 		print "syscall number for EXEC not found"
 		sys.exit(1)
@@ -1074,16 +1068,16 @@ def sched__sched_process_exec_old(event_name, context, common_cpu,
 
 class Event_sched_process_fork (Event):
 
-	def __init__(self, timestamp, cpu, tid, comm, pid):
+	def __init__(self, timestamp, cpu, tid, comm, parent_tid, pid):
 		self.timestamp = timestamp
 		self.cpu = cpu
 		self.tid = tid
 		self.command = comm
 		self.pid = pid
 		self.mode = 'idle'
+		self.parent_tid = parent_tid
 
 	def process(self):
-		global CLONE
 		global start_timestamp, curr_timestamp
 		curr_timestamp = self.timestamp
 		if (start_timestamp == 0):
@@ -1092,18 +1086,35 @@ class Event_sched_process_fork (Event):
 		task = super(Event_sched_process_fork, self).process()
 		task.timestamp = self.timestamp
 
-		task.sched_stat = True
-		id = CLONE
-		task.resume_mode = 'sys'
-		task.syscall = id
-		task.syscalls[id] = Call()
-		task.syscalls[id].timestamp = self.timestamp
+		try:
+			parent = tasks[self.parent_tid]
+		except:
+			# need to create parent task here!
+			sys.exit(1)
+			parent = Task()
+			parent.timestamp = start_timestamp
+			parent.command = self.command
+			parent.mode = 'sys'
+			parent.sched_stat = True # ?
+			parent.cpu = self.cpu
+			parent.cpus[parent.cpu] = CPU()
+			tasks[self.parent_tid] = parent
+
+		task.timestamp = self.timestamp
+		task.command = self.command
+		task.mode = 'idle'
+		task.resume_mode = parent.mode # ? 'sys' ?
+		task.sched_stat = True # ?
+		task.pid = 'unknown' # ?
+		task.syscall = parent.syscall
+		task.syscalls[task.syscall] = Call()
+		task.syscalls[task.syscall].timestamp = self.timestamp
 
 def sched__sched_process_fork_new(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, parent_comm, parent_pid, child_comm, child_pid, perf_sample_dict):
 
-	event = Event_sched_process_fork(nsecs(common_secs,common_nsecs), common_cpu, child_pid, child_comm, 'unknown')
+	event = Event_sched_process_fork(nsecs(common_secs,common_nsecs), common_cpu, child_pid, child_comm, parent_pid, 'unknown')
 	process_event(event)
 
 def sched__sched_process_fork_old(event_name, context, common_cpu,
