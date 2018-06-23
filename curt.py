@@ -1090,22 +1090,14 @@ class Event_sched_process_fork (Event):
 			parent = tasks[self.parent_tid]
 		except:
 			# need to create parent task here!
-			sys.exit(1)
-			parent = Task()
-			parent.timestamp = start_timestamp
-			parent.command = self.command
-			parent.mode = 'sys'
+			parent = Task(start_timestamp, self.command, 'sys', self.pid)
 			parent.sched_stat = True # ?
 			parent.cpu = self.cpu
 			parent.cpus[parent.cpu] = CPU()
 			tasks[self.parent_tid] = parent
 
-		task.timestamp = self.timestamp
-		task.command = self.command
-		task.mode = 'idle'
 		task.resume_mode = parent.mode # ? 'sys' ?
 		task.sched_stat = True # ?
-		task.pid = 'unknown' # ?
 		task.syscall = parent.syscall
 		task.syscalls[task.syscall] = Call()
 		task.syscalls[task.syscall].timestamp = self.timestamp
