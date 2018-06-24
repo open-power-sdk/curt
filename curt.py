@@ -391,20 +391,8 @@ def irq_name(irq):
 		return irq_to_name[irq]
 	return str(irq)
 
-EXEC = 0
-
 def trace_begin():
-	global EXEC
-	# find the (architecture-specific) syscall numbers
-	# to be used later in synthetic trace events
-	id = 0
-	while (EXEC == 0) and id < 512:
-		if syscall_name(id) == "execve":
-			EXEC = id
-		id += 1
-	if EXEC == 0:
-		print "syscall number for EXEC not found"
-		sys.exit(1)
+	pass
 
 def trace_end():
 	global events
@@ -1015,13 +1003,18 @@ class Event_sched_process_exec (Event):
 		self.mode = 'sys'
 
 	def process(self):
-		global EXEC
 		global start_timestamp, curr_timestamp
 		curr_timestamp = self.timestamp
 		if (start_timestamp == 0):
 			start_timestamp = curr_timestamp
 
 		task = super(Event_sched_process_exec, self).process()
+
+		new_task = Task(self.timestamp, self.command, task.mode, self.pid)
+		new_task.sched_stat = True
+		new_task.syscall = task.syscall
+		new_task.syscalls[task.syscall] = Call()
+		new_task.syscalls[task.syscall].timestamp = self.timestamp
 
 		# close out current task stats and stow them somewhere,
 		# because we're reusing the TID for a new process image,
@@ -1031,24 +1024,20 @@ class Event_sched_process_exec (Event):
 
 		suffix=0
 		while True:
-			new_tid = str(self.tid)+"-"+str(suffix)
-			if new_tid in tasks:
+			old_tid = str(self.tid)+"-"+str(suffix)
+			if old_tid in tasks:
 				suffix += 1
 			else:
 				break
-		debug_print("\t\"new\" task \"%s\"" % (new_tid))
+		debug_print("\t\"old\" task \"%s\"" % (old_tid))
 
-		tasks[new_tid] = tasks[self.tid]
+		tasks[old_tid] = tasks[self.tid]
 		if params.debug:
-			print_task_stats({new_tid: tasks[new_tid]})
+			print_task_stats({old_tid: tasks[old_tid]})
 
 		del tasks[self.tid]
 
-		task = Task(self.timestamp, self.command, 'idle', self.pid)
-		tasks[self.tid] = task
-		task.sched_stat = True
-		event = Event_sys_enter(self.timestamp, self.cpu, self.tid, self.command, EXEC, self.pid)
-		process_event(event)
+		tasks[self.tid] = new_task
 
 def sched__sched_process_exec_new(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
