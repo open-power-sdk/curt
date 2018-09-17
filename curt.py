@@ -48,7 +48,7 @@ $ ./curt.py --record all command
 ''')
 parser.add_argument('--debug', action='store_true', help='enable debugging output')
 parser.add_argument('--window', type=int, help='maximum event sequence length for correcting out-of-order events', default=20)
-parser.add_argument('--api', type=int, help='use newer(2) perf API', default=1)
+parser.add_argument('--api', type=int, help='use newer(2) perf API', default=2)
 parser.add_argument('--record',
 	metavar='EVENTLIST',
 	help="record events (instead of generating report). "
@@ -114,6 +114,36 @@ except:
 		print sys.argv
 	os.execvp("perf", sys.argv)
 	sys.exit(1)
+
+# perf added an additional parameter to event handlers, perf_sample_dict,
+# in Linux 4.14 (commit a641860550f05a4b8889dca61aab73c84b2d5e16), which
+# altered the event handler API in a binary-incompatible way.
+# Using the new API on a system which does not support it results in an
+# exception like:
+#   TypeError: event__handler() takes exactly 11 arguments (10 given)
+# Here, we catch all exceptions, and if it seems to match the above
+# exception, we attempt to revert to the older perf event handler API.
+
+def checkAPI(t, val, backtrace):
+	if t == TypeError and str(val).find('takes exactly'):
+		# remove any existing "--api" parameters
+		new_argv = []
+		arg = 0
+		while arg < len(sys.argv):
+			if sys.argv[arg].find("--api=") != -1:
+				pass
+			elif sys.argv[arg] == "--api":
+				arg = arg+1
+			else:
+				new_argv.append(sys.argv[arg])
+			arg = arg+1
+		new_argv.insert(1,"--api=1")
+		debug_print(new_argv)
+		os.execvp(new_argv[0],new_argv)
+		sys.exit(1)
+	sys.__excepthook__(t, val, backtrace)
+
+sys.excepthook = checkAPI
 
 from Core import *
 from Util import *
