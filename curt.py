@@ -125,7 +125,7 @@ except:
 # exception, we attempt to revert to the older perf event handler API.
 
 def checkAPI(t, val, backtrace):
-	if t == TypeError and str(val).find('takes exactly'):
+	if t == TypeError and str(val).find('takes exactly') >= 0:
 		# remove any existing "--api" parameters
 		new_argv = []
 		arg = 0
