@@ -1045,6 +1045,8 @@ class Event_sched_process_exec (Event):
 		new_task.syscall = task.syscall
 		new_task.syscalls[task.syscall] = Call()
 		new_task.syscalls[task.syscall].timestamp = self.timestamp
+		new_task.cpu = self.cpu
+		new_task.cpus[self.cpu] = CPU()
 
 		# close out current task stats and stow them somewhere,
 		# because we're reusing the TID for a new process image,
