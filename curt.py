@@ -642,6 +642,10 @@ class Event_sys_exit ( Event ):
 			self.id = task.syscall
 			print("%016u %7s/%06u [%03u] %-32s %-20s seccomp rejected syscall" % (self.timestamp, str(self.pid), self.tid, self.cpu, self.__class__.__name__, syscall_name(self.id)))
 
+		elif self.id == 0 and syscall_name(self.id) == None:
+			self.id = task.syscall
+			print("%016u %7s/%06u [%03u] %-32s %-20s remapping syscall(0)" % (self.timestamp, str(self.pid), self.tid, self.cpu, self.__class__.__name__, syscall_name(self.id)))
+
 		if self.id not in task.syscalls:
 			task.syscalls[self.id] = Call()
 			task.syscalls[self.id].timestamp = start_timestamp
