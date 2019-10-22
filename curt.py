@@ -3,6 +3,7 @@
 # Project name: curt
 # This project is licensed under the GPL License 2.0, see LICENSE.
 
+from __future__ import print_function
 import os
 import sys
 import string
@@ -94,14 +95,14 @@ if params.record:
 	command = ['perf', 'record', '--quiet', '--all-cpus',
 		'--event', eventlist ] + params.file_or_command
 	if params.debug:
-		print command
+		print(command)
 	subprocess.call(command)
 	params.file_or_command = []
 
 try:
 	from perf_trace_context import *
 except:
-	print "Relaunching under \"perf\" command..."
+	print("Relaunching under \"perf\" command...")
 	if len(params.file_or_command) == 0:
 		params.file_or_command = [ "perf.data" ]
 	sys.argv = ['perf', 'script', '-i' ] + params.file_or_command + [ '-s', sys.argv[0] ]
@@ -111,7 +112,7 @@ except:
 		sys.argv.append('--debug')
 	sys.argv += ['--api', str(params.api)]
 	if params.debug:
-		print sys.argv
+		print(sys.argv)
 	os.execvp("perf", sys.argv)
 	sys.exit(1)
 
@@ -180,15 +181,15 @@ class CPU:
 		self.unaccounted += cpu.unaccounted
 
 	def output_header(self):
-		print "%12s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%%" % \
-			("user", "sys", "irq", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util"),
+		print("%12s %12s %12s %12s %12s %12s | %12s %12s %12s %12s %12s %12s | %5s%%" % \
+			("user", "sys", "irq", "hv", "busy", "idle", "runtime", "sleep", "wait", "blocked", "iowait", "unaccounted", "util"),end=' ')
 
 	def output(self):
-		print "%12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % \
+		print("%12.6f %12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % \
 			(ns2ms(self.user), ns2ms(self.sys), ns2ms(self.irq), ns2ms(self.hv), ns2ms(self.busy_unknown), ns2ms(self.idle), \
-			ns2ms(self.runtime), ns2ms(self.sleep), ns2ms(self.wait), ns2ms(self.blocked), ns2ms(self.blocked), ns2ms(self.unaccounted)),
+			ns2ms(self.runtime), ns2ms(self.sleep), ns2ms(self.wait), ns2ms(self.blocked), ns2ms(self.blocked), ns2ms(self.unaccounted)),end=' ')
 		running = self.user + self.sys + self.irq + self.hv + self.busy_unknown
-		print "| %5.1f%%" % ((float(running * 100) / float(running + self.idle)) if running > 0 else 0),
+		print("| %5.1f%%" % ((float(running * 100) / float(running + self.idle)) if running > 0 else 0),end=' ')
 
 class Call:
 	def __init__(self):
@@ -211,14 +212,14 @@ class Call:
 			self.max = call.max
 
 	def output_header(self):
-		print "\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("ID", "name", "count", "elapsed", "pending", "average", "minimum", "maximum"),
+		print("\t     -- (%3s)%-20s %6s %12s %12s %12s %12s %12s" % ("ID", "name", "count", "elapsed", "pending", "average", "minimum", "maximum"),end=' ')
 
 	def output(self, id, name):
-		print "\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, name, self.count, ns2ms(self.elapsed), ns2ms(self.pending)),
+		print("\t\t(%3u)%-20s %6u %12.6f %12.6f" % (id, name, self.count, ns2ms(self.elapsed), ns2ms(self.pending)),end=' ')
 		if self.count > 0:
-			print "%12.6f %12.6f %12.6f" % (ns2ms(float(self.elapsed)/float(self.count)), ns2ms(self.min), ns2ms(self.max))
+			print("%12.6f %12.6f %12.6f" % (ns2ms(float(self.elapsed)/float(self.count)), ns2ms(self.min), ns2ms(self.max)))
 		else:
-			print "%12s %12s %12s" % ("--", "--", "--")
+			print("%12s %12s %12s" % ("--", "--", "--"))
 
 class Task:
 	def __init__(self, timestamp, comm, mode, pid):
@@ -267,20 +268,20 @@ class Task:
 		self.timestamp = timestamp
 
 	def output_header(self):
-		print "     -- [%8s] %-20s %3s" % ("task", "command", "cpu"),
+		print("     -- [%8s] %-20s %3s" % ("task", "command", "cpu"),end=' ')
 		for cpu in self.cpus:
 			self.cpus[cpu].output_header()
 			break # I just need one to emit the header
-		print "%6s" % ("moves"),
+		print("%6s" % ("moves"),end=' ')
 
 	def output_migrations(self):
-		print "%6u" % (self.migrations),
+		print("%6u" % (self.migrations),end=' ')
 
 tasks = {}
 
 def debug_print(s):
 	if params.debug:
-		print s
+		print(s)
 
 # convert string in the form of a bytearray with null termination
 # (plus garbage thereafter)
@@ -585,7 +586,7 @@ class Event_sys_enter ( Event ):
 		task = super(Event_sys_enter, self).process()
 
 		if task.mode == 'sys':
-			print "re-entered! syscall from signal handler??"
+			print("re-entered! syscall from signal handler??")
 			sys.exit(0)
 
 		if task.mode == 'busy-unknown':
@@ -1323,9 +1324,9 @@ def sched__sched_stat_sleep_old(event_name, context, common_cpu,
 
 
 def print_task_CPU(cpuinfo):
-	print "%12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % (ns2ms(cpuinfo.user), ns2ms(cpuinfo.sys), ns2ms(cpuinfo.hv), ns2ms(cpuinfo.busy_unknown), ns2ms(cpuinfo.idle), ns2ms(cpuinfo.runtime), ns2ms(cpuinfo.sleep), ns2ms(cpuinfo.wait), ns2ms(cpuinfo.blocked), ns2ms(cpuinfo.blocked), ns2ms(cpuinfo.unaccounted)),
+	print("%12.6f %12.6f %12.6f %12.6f %12.6f | %12.6f %12.6f %12.6f %12.6f %12.6f %12.6f" % (ns2ms(cpuinfo.user), ns2ms(cpuinfo.sys), ns2ms(cpuinfo.hv), ns2ms(cpuinfo.busy_unknown), ns2ms(cpuinfo.idle), ns2ms(cpuinfo.runtime), ns2ms(cpuinfo.sleep), ns2ms(cpuinfo.wait), ns2ms(cpuinfo.blocked), ns2ms(cpuinfo.blocked), ns2ms(cpuinfo.unaccounted)),end=' ')
 	running = cpuinfo.user + cpuinfo.sys + cpuinfo.hv + cpuinfo.busy_unknown
-	print "| %5.1f%%" % ((float(running * 100) / float(running + cpuinfo.idle)) if running > 0 else 0),
+	print("| %5.1f%%" % ((float(running * 100) / float(running + cpuinfo.idle)) if running > 0 else 0),end=' ')
 
 def report_calls(calls, id2name, process_calls, system_calls):
 	for id in calls:
@@ -1352,7 +1353,7 @@ def print_task_stats(tasks):
 			 pids.append(pid)
 	if not pids:
 		return
-	print "--  PID:"
+	print("--  PID:")
 	system = Task(0, 'ALL', 'all', 'ALL')
 	system_cpus_sum = CPU()
 	process = Task(0, 'PROCESS', 'all', pid)
@@ -1361,7 +1362,7 @@ def print_task_stats(tasks):
 	for pid in sorted(pids):
 		if pid == 0:
 			continue
-		print "%7s:" % (str(pid))
+		print("%7s:" % (str(pid)))
 		process.__init__(0, 'PROCESS', 'all', pid)
 		process_cpus_sum.__init__()
 		for tid in sorted(tasks):
@@ -1370,7 +1371,7 @@ def print_task_stats(tasks):
 			task = tasks[tid]
 			if task.pid == pid and task != 0:
 				task.output_header()
-				print
+				print()
 				# each "comm" is delivered as a bytearray:
 				#   the actual command, a null terminator, and garbage
 				# "print" wants to splat every byte, including the garbage
@@ -1378,37 +1379,37 @@ def print_task_stats(tasks):
 				comm = null(task.command)
 				task_cpus_sum.__init__()
 				for cpu in task.cpus:
-					print "\t[%8s] %-20s %3u" % (tid, comm, cpu),
+					print("\t[%8s] %-20s %3u" % (tid, comm, cpu),end=' ')
 					task.cpus[cpu].output()
-					print
+					print()
 					task_cpus_sum.accumulate(task.cpus[cpu])
 					if cpu not in process.cpus:
 						process.cpus[cpu] = CPU()
 					process.cpus[cpu].accumulate(task.cpus[cpu])
 				process_cpus_sum.accumulate(task_cpus_sum)
-				print "\t[%8s] %-20s ALL" % (tid, comm),
+				print("\t[%8s] %-20s ALL" % (tid, comm),end=' ')
 				task_cpus_sum.output()
 				task.output_migrations()
-				print
+				print()
 				process.migrations += task.migrations
-				print
+				print()
 				if task.syscalls:
 					report_calls(task.syscalls, syscall_name, process.syscalls, system.syscalls)
-					print
+					print()
 				if task.hcalls:
 					report_calls(task.hcalls, hcall_name, process.hcalls, system.hcalls)
-					print
+					print()
 				if task.irqs:
 					report_calls(task.irqs, irq_name, process.irqs, system.irqs)
-					print
+					print()
 
 		process.output_header()
-		print
-		print "\t[     ALL] %-20s ALL" % (""),
+		print()
+		print("\t[     ALL] %-20s ALL" % (""),end=' ')
 		process_cpus_sum.output()
 		process.output_migrations()
-		print
-		print
+		print()
+		print()
 
 		for cpu in process.cpus:
 			if cpu not in system.cpus:
@@ -1417,44 +1418,44 @@ def print_task_stats(tasks):
 		system_cpus_sum.accumulate(process_cpus_sum)
 		system.migrations += process.migrations
 
-	print "%7s:" % ("ALL")
+	print("%7s:" % ("ALL"))
 	for tid in tasks:
 		tasks[tid].output_header()
-		print
+		print()
 		break # I just need one to emit the header
-	print "\t[     ALL] %-20s ALL" % (""),
+	print("\t[     ALL] %-20s ALL" % (""),end=' ')
 	system_cpus_sum.output()
 	system.output_migrations()
-	print
-	print
+	print()
+	print()
 	if system.syscalls:
 		for id in system.syscalls:
 			system.syscalls[id].output_header()
-			print
+			print()
 			break # I just need one to emit the header
 		for id in sorted(system.syscalls, key= lambda x: (system.syscalls[x].count, system.syscalls[x].elapsed), reverse=True):
 			system.syscalls[id].output(id, syscall_name(id))
-		print
+		print()
 
 	if system.hcalls:
 		for id in system.hcalls:
 			system.hcalls[id].output_header()
-			print
+			print()
 			break # I just need one to emit the header
 		for id in sorted(system.hcalls, key= lambda x: (system.hcalls[x].count, system.hcalls[x].elapsed), reverse=True):
 			system.hcalls[id].output(id, hcall_name(id))
-		print
+		print()
 
 	if system.irqs:
 		for id in system.irqs:
 			system.irqs[id].output_header()
-			print
+			print()
 			break # I just need one to emit the header
 		for id in sorted(system.irqs, key= lambda x: (system.irqs[x].count, system.irqs[x].elapsed), reverse=True):
 			system.irqs[id].output(id, irq_name(id))
-		print
+		print()
 
-	print "Total Trace Time: %f ms" % ns2ms(curr_timestamp - start_timestamp)
+	print("Total Trace Time: %f ms" % ns2ms(curr_timestamp - start_timestamp))
 
 if params.api == 1:
 	dummy_dict = {}
