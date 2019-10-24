@@ -291,6 +291,7 @@ def null(ba):
 		null = ba.find(b'\x00')
 		if null >= 0:
 			ba = ba[0:null]
+		ba = ba.decode()
 	except: pass
 	return str(ba)
 
