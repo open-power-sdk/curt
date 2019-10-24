@@ -49,7 +49,6 @@ $ ./curt.py --record all command
 ''')
 parser.add_argument('--debug', action='store_true', help='enable debugging output')
 parser.add_argument('--window', type=int, help='maximum event sequence length for correcting out-of-order events', default=20)
-parser.add_argument('--api', type=int, help='use newer(2) perf API', default=2)
 parser.add_argument('--record',
 	metavar='EVENTLIST',
 	help="record events (instead of generating report). "
@@ -110,41 +109,10 @@ except:
 	sys.argv += ['--window', str(params.window)]
 	if params.debug:
 		sys.argv.append('--debug')
-	sys.argv += ['--api', str(params.api)]
 	if params.debug:
 		print(sys.argv)
 	os.execvp("perf", sys.argv)
 	sys.exit(1)
-
-# perf added an additional parameter to event handlers, perf_sample_dict,
-# in Linux 4.14 (commit a641860550f05a4b8889dca61aab73c84b2d5e16), which
-# altered the event handler API in a binary-incompatible way.
-# Using the new API on a system which does not support it results in an
-# exception like:
-#   TypeError: event__handler() takes exactly 11 arguments (10 given)
-# Here, we catch all exceptions, and if it seems to match the above
-# exception, we attempt to revert to the older perf event handler API.
-
-def checkAPI(t, val, backtrace):
-	if t == TypeError and str(val).find('takes exactly') >= 0:
-		# remove any existing "--api" parameters
-		new_argv = []
-		arg = 0
-		while arg < len(sys.argv):
-			if sys.argv[arg].find("--api=") != -1:
-				pass
-			elif sys.argv[arg] == "--api":
-				arg = arg+1
-			else:
-				new_argv.append(sys.argv[arg])
-			arg = arg+1
-		new_argv.insert(1,"--api=1")
-		debug_print(new_argv)
-		os.execvp(new_argv[0],new_argv)
-		sys.exit(1)
-	sys.__excepthook__(t, val, backtrace)
-
-sys.excepthook = checkAPI
 
 from Core import *
 from Util import *
@@ -605,14 +573,10 @@ class Event_sys_enter ( Event ):
 		task.syscalls[self.id].timestamp = curr_timestamp
 		task.change_mode(curr_timestamp, 'sys')
 
-def raw_syscalls__sys_enter_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, perf_sample_dict):
+def raw_syscalls__sys_enter(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, perf_sample_dict):
 
 	event = Event_sys_enter(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, id, getpid(perf_sample_dict))
 	process_event(event)
-
-def raw_syscalls__sys_enter_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args):
-	global dummy_dict
-	raw_syscalls__sys_enter_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, args, dummy_dict)
 
 class Event_sys_exit ( Event ):
 
@@ -686,15 +650,10 @@ class Event_sys_exit ( Event ):
 
 		task.change_mode(curr_timestamp, 'user')
 
-def raw_syscalls__sys_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
+def raw_syscalls__sys_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, perf_sample_dict):
 
 	event = Event_sys_exit(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, id, getpid(perf_sample_dict))
 	process_event(event)
-
-def raw_syscalls__sys_exit_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret):
-
-	global dummy_dict
-	raw_syscalls__sys_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, id, ret, dummy_dict)
 
 class Event_hcall_entry ( Event ):
 
@@ -723,15 +682,10 @@ class Event_hcall_entry ( Event ):
 		task.hcalls[self.opcode].timestamp = curr_timestamp
 		task.change_mode(curr_timestamp, 'hv')
 
-def powerpc__hcall_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, perf_sample_dict):
+def powerpc__hcall_entry(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, perf_sample_dict):
 
 	event = Event_hcall_entry(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, opcode, getpid(perf_sample_dict))
 	process_event(event)
-
-def powerpc__hcall_entry_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode):
-
-	global dummy_dict
-	powerpc__hcall_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, dummy_dict)
 
 class Event_hcall_exit ( Event ):
 
@@ -792,15 +746,10 @@ class Event_hcall_exit ( Event ):
 
 		task.change_mode(curr_timestamp, task.resume_mode)
 
-def powerpc__hcall_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval, perf_sample_dict):
+def powerpc__hcall_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval, perf_sample_dict):
 
 	event = Event_hcall_exit(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, opcode, getpid(perf_sample_dict))
 	process_event(event)
-
-def powerpc__hcall_exit_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval):
-
-	global dummy_dict
-	powerpc__hcall_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, opcode, retval, dummy_dict)
 
 class Event_irq_handler_entry ( Event ):
 
@@ -830,16 +779,11 @@ class Event_irq_handler_entry ( Event ):
 		task.irqs[self.irq].timestamp = curr_timestamp
 		task.change_mode(curr_timestamp, 'irq')
 
-def irq__irq_handler_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, perf_sample_dict):
+def irq__irq_handler_entry(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, perf_sample_dict):
 
 	irq_to_name[irq] = name
 	event = Event_irq_handler_entry(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, irq, name, getpid(perf_sample_dict))
 	process_event(event)
-
-def irq__irq_handler_entry_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name):
-
-	global dummy_dict
-	irq__irq_handler_entry_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, name, dummy_dict)
 
 class Event_irq_handler_exit ( Event ):
 
@@ -900,15 +844,10 @@ class Event_irq_handler_exit ( Event ):
 
 		task.change_mode(curr_timestamp, task.resume_mode)
 
-def irq__irq_handler_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret, perf_sample_dict):
+def irq__irq_handler_exit(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret, perf_sample_dict):
 
 	event = Event_irq_handler_exit(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, irq, getpid(perf_sample_dict))
 	process_event(event)
-
-def irq__irq_handler_exit_old(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret):
-
-	global dummy_dict
-	irq__irq_handler_exit_new(event_name, context, common_cpu, common_secs, common_nsecs, common_pid, common_comm, common_callchain, irq, ret, dummy_dict)
 
 class Event_sched_switch_out (Event):
 
@@ -963,7 +902,7 @@ class Event_sched_switch_in (Event):
 
 		task.change_mode(curr_timestamp, task.resume_mode)
 
-def sched__sched_switch_new(event_name, context, common_cpu,
+def sched__sched_switch(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, prev_comm, prev_pid, prev_prio, prev_state, 
 	next_comm, next_pid, next_prio, perf_sample_dict):
@@ -973,17 +912,6 @@ def sched__sched_switch_new(event_name, context, common_cpu,
 	process_event(event)
 	event = Event_sched_switch_in(timestamp, common_cpu, next_pid, next_comm, 'unknown')
 	process_event(event)
-
-def sched__sched_switch_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, prev_comm, prev_pid, prev_prio, prev_state, 
-	next_comm, next_pid, next_prio):
-
-	global dummy_dict
-	sched__sched_switch_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, prev_comm, prev_pid, prev_prio, prev_state, 
-		next_comm, next_pid, next_prio, dummy_dict)
 
 class Event_sched_migrate_task (Event):
 
@@ -1014,24 +942,13 @@ class Event_sched_migrate_task (Event):
 			task.cpus[self.dest_cpu] = CPU()
 		task.cpu = self.dest_cpu
 
-def sched__sched_migrate_task_new(event_name, context, common_cpu,
+def sched__sched_migrate_task(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, orig_cpu, 
 	dest_cpu, perf_sample_dict):
 
 	event = Event_sched_migrate_task(nsecs(common_secs,common_nsecs), orig_cpu, pid, comm, dest_cpu, 'unknown')
 	process_event(event)
-
-def sched__sched_migrate_task_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio, orig_cpu, 
-	dest_cpu):
-
-	global dummy_dict
-	sched__sched_migrate_task_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, prio, orig_cpu, 
-		dest_cpu, dummy_dict)
 
 class Event_sched_process_exec (Event):
 
@@ -1083,21 +1000,12 @@ class Event_sched_process_exec (Event):
 
 		tasks[self.tid] = new_task
 
-def sched__sched_process_exec_new(event_name, context, common_cpu,
+def sched__sched_process_exec(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, filename, pid, old_pid, perf_sample_dict):
 
 	event = Event_sched_process_exec(nsecs(common_secs,common_nsecs), common_cpu, common_pid, common_comm, filename, getpid(perf_sample_dict))
 	process_event(event)
-
-def sched__sched_process_exec_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, filename, pid, old_pid):
-
-	global dummy_dict
-	sched__sched_process_exec_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, filename, pid, old_pid, dummy_dict)
 
 class Event_sched_process_fork (Event):
 
@@ -1135,21 +1043,12 @@ class Event_sched_process_fork (Event):
 		task.syscalls[task.syscall] = Call()
 		task.syscalls[task.syscall].timestamp = self.timestamp
 
-def sched__sched_process_fork_new(event_name, context, common_cpu,
+def sched__sched_process_fork(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, parent_comm, parent_pid, child_comm, child_pid, perf_sample_dict):
 
 	event = Event_sched_process_fork(nsecs(common_secs,common_nsecs), common_cpu, child_pid, child_comm, parent_pid, 'unknown')
 	process_event(event)
-
-def sched__sched_process_fork_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, parent_comm, parent_pid, child_comm, child_pid):
-
-	global dummy_dict
-	sched__sched_process_fork_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, parent_comm, parent_pid, child_comm, child_pid, dummy_dict)
 
 class Event_sched_process_exit (Event):
 
@@ -1171,21 +1070,12 @@ class Event_sched_process_exit (Event):
 
 		task.change_mode(self.timestamp, 'exit')
 
-def sched__sched_process_exit_new(event_name, context, common_cpu,
+def sched__sched_process_exit(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, prio, perf_sample_dict):
 
 	event = Event_sched_process_exit(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, getpid(perf_sample_dict))
 	process_event(event)
-
-def sched__sched_process_exit_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, prio):
-
-	global dummy_dict
-	sched__sched_process_exit_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, prio, dummy_dict)
 
 class Event_sched_stat (Event):
 
@@ -1240,7 +1130,7 @@ class Event_sched_stat (Event):
 			debug_print("\t%s %u + %u = %u" % (self.bucket, task.cpus[task.cpu].iowait, self.delta, task.cpus[task.cpu].iowait + self.delta))
 			task.cpus[task.cpu].iowait += self.delta
 
-def sched__sched_stat_runtime_new(event_name, context, common_cpu,
+def sched__sched_stat_runtime(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, runtime, vruntime, 
 		perf_sample_dict):
@@ -1248,79 +1138,33 @@ def sched__sched_stat_runtime_new(event_name, context, common_cpu,
 	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, runtime, 'runtime')
 	process_event(event)
 
-def sched__sched_stat_runtime_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, runtime, vruntime):
-
-	global dummy_dict
-	sched__sched_stat_runtime_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, runtime, vruntime, 
-		dummy_dict)
-
-def sched__sched_stat_blocked_new(event_name, context, common_cpu,
+def sched__sched_stat_blocked(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
 	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'blocked')
 	process_event(event)
 
-def sched__sched_stat_blocked_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay, perf_sample_dict):
-
-	global dummy_dict
-	sched__sched_stat_blocked_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, delay, dummy_dict)
-
-def sched__sched_stat_iowait_new(event_name, context, common_cpu,
+def sched__sched_stat_iowait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
 	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'iowait')
 	process_event(event)
 
-def sched__sched_stat_iowait_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay):
-
-	global dummy_dict
-	sched__sched_stat_iowait_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, delay, dummy_dict)
-
-def sched__sched_stat_wait_new(event_name, context, common_cpu,
+def sched__sched_stat_wait(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
 	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'wait')
 	process_event(event)
 
-def sched__sched_stat_wait_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay):
-
-	global dummy_dict
-	sched__sched_stat_wait_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, delay, dummy_dict)
-
-def sched__sched_stat_sleep_new(event_name, context, common_cpu,
+def sched__sched_stat_sleep(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	common_callchain, comm, pid, delay, perf_sample_dict):
 
 	event = Event_sched_stat(nsecs(common_secs,common_nsecs), common_cpu, pid, comm, delay, 'sleep')
 	process_event(event)
-
-def sched__sched_stat_sleep_old(event_name, context, common_cpu,
-	common_secs, common_nsecs, common_pid, common_comm,
-	common_callchain, comm, pid, delay):
-
-	global dummy_dict
-	sched__sched_stat_sleep_new(event_name, context, common_cpu,
-		common_secs, common_nsecs, common_pid, common_comm,
-		common_callchain, comm, pid, delay, dummy_dict)
 
 #def trace_unhandled(event_name, context, event_fields_dict):
 #	pass
@@ -1459,41 +1303,3 @@ def print_task_stats(tasks):
 		print()
 
 	print("Total Trace Time: %f ms" % ns2ms(curr_timestamp - start_timestamp))
-
-if params.api == 1:
-	dummy_dict = {}
-	dummy_dict['sample'] = {}
-	dummy_dict['sample']['pid'] = 'unknown'
-	raw_syscalls__sys_enter = raw_syscalls__sys_enter_old
-	raw_syscalls__sys_exit = raw_syscalls__sys_exit_old
-	powerpc__hcall_entry = powerpc__hcall_entry_old
-	powerpc__hcall_exit = powerpc__hcall_exit_old
-	irq__irq_handler_entry = irq__irq_handler_entry_old
-	irq__irq_handler_exit = irq__irq_handler_exit_old
-	sched__sched_switch = sched__sched_switch_old
-	sched__sched_migrate_task = sched__sched_migrate_task_old
-	sched__sched_process_exec = sched__sched_process_exec_old
-	sched__sched_process_fork = sched__sched_process_fork_old
-	sched__sched_process_exit = sched__sched_process_exit_old
-	sched__sched_stat_runtime = sched__sched_stat_runtime_old
-	sched__sched_stat_blocked = sched__sched_stat_blocked_old
-	sched__sched_stat_iowait = sched__sched_stat_iowait_old
-	sched__sched_stat_wait = sched__sched_stat_wait_old
-	sched__sched_stat_sleep = sched__sched_stat_sleep_old
-else:
-	raw_syscalls__sys_enter = raw_syscalls__sys_enter_new
-	raw_syscalls__sys_exit = raw_syscalls__sys_exit_new
-	powerpc__hcall_entry = powerpc__hcall_entry_new
-	powerpc__hcall_exit = powerpc__hcall_exit_new
-	irq__irq_handler_entry = irq__irq_handler_entry_new
-	irq__irq_handler_exit = irq__irq_handler_exit_new
-	sched__sched_switch = sched__sched_switch_new
-	sched__sched_migrate_task = sched__sched_migrate_task_new
-	sched__sched_process_exec = sched__sched_process_exec_new
-	sched__sched_process_fork = sched__sched_process_fork_new
-	sched__sched_process_exit = sched__sched_process_exit_new
-	sched__sched_stat_runtime = sched__sched_stat_runtime_new
-	sched__sched_stat_blocked = sched__sched_stat_blocked_new
-	sched__sched_stat_iowait = sched__sched_stat_iowait_new
-	sched__sched_stat_wait = sched__sched_stat_wait_new
-	sched__sched_stat_sleep = sched__sched_stat_sleep_new
