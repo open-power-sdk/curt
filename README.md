@@ -25,9 +25,9 @@ The project's [maintainers](MAINTAINERS.txt) are responsible for reviewing and m
 We use [SDK Tools for Power Slack](https://toolsforpower.slack.com/) for communication.
 
 ## Installing
-Currently, the only project file used in processing is `curt.py`.  One could download that directly from the [curt GitHub repository](https://github.ibm.com/sdk/curt), or clone the git repository and use it from there:
+Currently, the only project file used in processing is `curt.py`.  One could download that directly from the [curt GitHub repository](https://github.com/open-power-sdk/curt), or clone the git repository and use it from there:
 ```
-    $ git clone https://github.ibm.com/sdk/curt.git
+    $ git clone https://github.com/open-power-sdk/curt.git
     $ ls curt/curt.py
     curt/curt.py
 ```
